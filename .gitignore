@@ -19,3 +19,4 @@ web/deployment.json
 web/vendor/
 test-results/
 playwright-report/
+.monitor-estado.json
