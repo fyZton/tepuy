@@ -9,6 +9,6 @@ export default defineConfig({
     settings: { optimizer: { enabled: true, runs: 200 }, evmVersion: "cancun" },
   },
   test: {
-    solidity: { fuzz: { runs: 1000 }, invariant: { runs: 64, depth: 32, failOnRevert: false } },
+    solidity: { fuzz: { runs: 1000 }, invariant: { runs: 256, depth: 64, failOnRevert: false } },
   },
 });

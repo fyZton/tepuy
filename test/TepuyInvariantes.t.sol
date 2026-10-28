@@ -78,6 +78,62 @@ contract TepuyInvariantes is Test {
         assertLe(token.totalSupply(), token.accionesAtestiguadas());
     }
 
+    // afterInvariant corre al final de CADA corrida y el estado se revierte entre corridas:
+    // se acumula en variables de entorno (persisten en el proceso) y se exige tras MIN_CORRIDAS.
+    uint256 constant MIN_CORRIDAS = 32;
+
+    function _acumular(string memory k, uint256 v) internal returns (uint256 t) {
+        t = vm.envOr(k, uint256(0)) + v;
+        vm.setEnv(k, vm.toString(t));
+    }
+
+    /// Tras la campaña: cada rama del handler se alcanzó, así los invariantes no pasan en vacío.
+    function afterInvariant() public {
+        uint256 corridas = _acumular("TEPUY_CORRIDAS", 1);
+        uint256 rev = _acumular("TEPUY_REV", handler.revocaciones());
+        uint256 con = _acumular("TEPUY_CON", handler.congelamientos());
+        uint256 pau = _acumular("TEPUY_PAU", handler.pausas());
+        uint256 rcp = _acumular("TEPUY_RCP", handler.recuperaciones());
+        uint256 frz = _acumular("TEPUY_FRZ", handler.forzadas() - handler.recuperaciones());
+        uint256 lot = _acumular("TEPUY_LOT", handler.lotes());
+        if (corridas < MIN_CORRIDAS) return;
+        assertGt(rev, 0, "sin revocaciones KYC");
+        assertGt(con, 0, "sin congelamientos");
+        assertGt(pau, 0, "sin pausas");
+        assertGt(rcp, 0, "sin recuperaciones");
+        assertGt(frz, 0, "sin forzadas");
+        assertGt(lot, 0, "sin lotes de dividendo");
+    }
+
+    /// Las recuperadas quedan con saldo 0, congeladas y sin KYC (nunca vuelven).
+    function invariant_recoveredStayDead() public view {
+        assertEq(handler.recuperadasMalas(), 0);
+    }
+
+    /// No vacuidad de S11: cada rama del handler se alcanza (pausa, congelar, revocar KYC, forzada, recuperación, ambas en pausa).
+    function test_handlerReachesEveryBranch() public {
+        handler.mint(0, 10);
+        handler.mint(1, 10);
+        handler.setVerified(1, false);
+        assertEq(handler.revocaciones(), 1);
+        handler.setVerified(1, true);
+        handler.setAddressFrozen(1, true);
+        assertEq(handler.congelamientos(), 1);
+        handler.setAddressFrozen(1, false);
+        handler.pause(0);
+        assertEq(handler.pausas(), 1);
+        handler.forcedTransfer(1, 0, 2); // en pausa, origen verificado
+        handler.recoveryAddress(1, 0);
+        assertEq(handler.forzadasEnPausa(), 2);
+        assertEq(handler.recuperaciones(), 1);
+        assertEq(handler.recuperadasMalas(), 0);
+        assertTrue(token.isRecovered(handler.actores(1)));
+        assertEq(token.balanceOf(handler.actores(1)), 0);
+        handler.setVerified(1, true); // rechazado: recuperada
+        assertFalse(token.isVerified(handler.actores(1)));
+        assertEq(handler.violaciones() + handler.violacionesForzada() + handler.violacionesPausa(), 0);
+    }
+
     /// No vacuidad: el handler sí logra mint, transfer y transferFrom exitosos (con estado inicial fijo).
     function test_handlerSucceeds() public {
         handler.mint(0, 10);

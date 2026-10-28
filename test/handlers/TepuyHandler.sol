@@ -36,6 +36,13 @@ contract TepuyHandler {
     uint256[] public divIds; // snapshots con dividendo declarado (sin repetidos)
     mapping(uint256 => uint256) public acunado; // fantasma: acciones acuñadas por dividendos de cada snapshot
     uint256 public violacionesDividendo; // un segundo lote idéntico acuñó algo; debe quedar en 0
+    // Contadores de no-vacuidad: ramas alcanzadas con éxito.
+    uint256 public revocaciones; // KYC retirado a una cuenta verificada
+    uint256 public congelamientos;
+    uint256 public pausas;
+    uint256 public recuperaciones;
+    uint256 public lotes; // lotes de dividendo exitosos
+    uint256 public forzadasEnPausa; // forzada o recuperación exitosa con el mercado pausado
     uint256[4][] private _snapSaldos; // fantasma: saldos de los actores al crear cada snapshot
 
     constructor(Tepuy t, address emisor_, address agente_, address supervisor_, address custodio_, address recuperador_, address oraculo_) {
@@ -75,13 +82,19 @@ contract TepuyHandler {
 
     // try/catch: una cuenta recuperada no puede verificarse ni descongelarse.
     function setVerified(uint256 i, bool v) external {
+        bool antes = token.isVerified(_actor(i));
         vm.prank(agente);
-        try token.setVerified(_actor(i), v) {} catch {}
+        try token.setVerified(_actor(i), v) {
+            if (antes && !v) revocaciones++;
+        } catch {}
     }
 
     function setAddressFrozen(uint256 i, bool c) external {
+        bool antes = token.isFrozen(_actor(i));
         vm.prank(supervisor);
-        try token.setAddressFrozen(_actor(i), c) {} catch {}
+        try token.setAddressFrozen(_actor(i), c) {
+            if (!antes && c) congelamientos++;
+        } catch {}
     }
 
     // Valores en [0, 3000]: a veces quedan bajo el suministro y el contrato debe rechazarlos.
@@ -96,6 +109,7 @@ contract TepuyHandler {
         vm.prank(supervisor);
         try token.pause() {
             snapPausa = true;
+            pausas++;
             supplyPausa = token.totalSupply();
             saldosPausa = this.sumaSaldos();
         } catch {}
@@ -172,6 +186,7 @@ contract TepuyHandler {
         vm.prank(recuperador);
         try token.recoveryAddress(perdida, nueva, "orden") {
             _registrarForzado(nueva, ok, frozen, supply);
+            recuperaciones++;
             if (token.balanceOf(perdida) != 0 || token.balanceOf(nueva) != deNueva + saldo) violacionesForzada++;
             if (!token.isFrozen(perdida) || token.isVerified(perdida) || !token.isRecovered(perdida)) violacionesForzada++;
         } catch {}
@@ -179,11 +194,21 @@ contract TepuyHandler {
 
     function _registrarForzado(address to, bool ok, bool frozen, uint256 supply) internal {
         forzadas++;
+        if (token.paused()) forzadasEnPausa++;
         if (token.totalSupply() != supply) violacionesForzada++;
         if (frozen) violacionesReceptorCongelado++;
         if (!ok) {
             violaciones++;
             recibioSinKyc[to] = true;
+        }
+    }
+
+    // Cuenta recuperada: saldo 0, congelada y sin KYC, para siempre.
+    function recuperadasMalas() external view returns (uint256 malas) {
+        for (uint256 i; i < 4; i++) {
+            address x = actores[i];
+            if (!token.isRecovered(x)) continue;
+            if (token.balanceOf(x) != 0 || token.isVerified(x) || !token.isFrozen(x)) malas++;
         }
     }
 
@@ -252,6 +277,7 @@ contract TepuyHandler {
         vm.prank(emisor);
         try token.distribuirDividendo(id, ts) {
             uint256 medio = token.totalSupply();
+            lotes++;
             acunado[id] += medio - antes;
             vm.prank(emisor);
             token.distribuirDividendo(id, ts);
