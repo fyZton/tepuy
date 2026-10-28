@@ -23,5 +23,6 @@ playwright-report/
 web/deployment.simArbitrum.json
 web/deployment.simAjena.json
 
-# Documentación interna (no se publica)
+# Notas locales
 docs/
+gan-harness/
