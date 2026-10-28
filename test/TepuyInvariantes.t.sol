@@ -43,6 +43,15 @@ contract TepuyInvariantes is Test {
         assertEq(handler.violaciones(), 0);
     }
 
+    /// Mientras está pausado, suministro y saldos son los de la foto al pausar.
+    function invariant_pausedFrozenState() public view {
+        assertEq(handler.violacionesPausa(), 0);
+        if (token.paused() && handler.snapPausa()) {
+            assertEq(token.totalSupply(), handler.supplyPausa());
+            assertEq(handler.sumaSaldos(), handler.saldosPausa());
+        }
+    }
+
     /// Verdad de base: los saldos suman el suministro y ningún actor con saldo recibió sin KYC.
     function invariant_balancesConsistent() public view {
         assertEq(handler.sumaSaldos(), token.totalSupply());
@@ -96,5 +105,21 @@ contract TepuyInvariantes is Test {
         handler.mint(0, 10);
         assertEq(handler.exitos(), 2);
         assertEq(token.totalSupply(), 20);
+    }
+
+    /// No vacuidad de la pausa: pausado nada se mueve, y despausar restaura.
+    function test_handlerPauseBlocks() public {
+        handler.mint(0, 10);
+        handler.pause(0);
+        handler.pause(1); // semilla no múltiplo de 8: no hace nada
+        handler.mint(0, 5);
+        handler.transfer(0, 1, 4);
+        handler.transferFrom(0, 1, 3);
+        assertEq(handler.exitos(), 1);
+        handler.unpause(8);
+        handler.transfer(0, 1, 4);
+        assertEq(handler.exitos(), 2);
+        assertEq(handler.violaciones(), 0);
+        assertEq(handler.violacionesPausa(), 0);
     }
 }

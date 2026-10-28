@@ -15,6 +15,10 @@ contract TepuyHandler {
     address public constant SPENDER = address(0xB000); // nunca verificado: no necesita KYC
     uint256 public exitos;
     uint256 public violaciones; // debe quedar en 0
+    uint256 public violacionesPausa; // movimientos exitosos en pausa; debe quedar en 0
+    bool public snapPausa; // hay foto tomada al pausar
+    uint256 public supplyPausa;
+    uint256 public saldosPausa;
     mapping(address => bool) public recibioSinKyc;
 
     constructor(Tepuy t, address emisor_, address agente_, address supervisor_, address custodio_) {
@@ -35,8 +39,9 @@ contract TepuyHandler {
         return token.isVerified(a) && !token.isFrozen(a);
     }
 
-    function _registrar(address from, bool fromOk, address to, bool toOk) internal {
+    function _registrar(address from, bool fromOk, address to, bool toOk, bool pausado) internal {
         exitos++;
+        if (pausado) violacionesPausa++;
         if ((from != address(0) && !fromOk) || !toOk) {
             violaciones++;
             recibioSinKyc[to] = true;
@@ -59,11 +64,31 @@ contract TepuyHandler {
         try token.setAttestedShares(n % 3001) {} catch {}
     }
 
+    // Se actúa solo 1 de cada 8 semillas para que casi todas las corridas tengan mercado abierto.
+    function pause(uint256 seed) external {
+        if (seed % 8 != 0) return;
+        vm.prank(supervisor);
+        try token.pause() {
+            snapPausa = true;
+            supplyPausa = token.totalSupply();
+            saldosPausa = this.sumaSaldos();
+        } catch {}
+    }
+
+    function unpause(uint256 seed) external {
+        if (seed % 8 != 0) return;
+        vm.prank(supervisor);
+        try token.unpause() {
+            snapPausa = false;
+        } catch {}
+    }
+
     function mint(uint256 i, uint256 n) external {
         address a = _actor(i);
         bool ok = _bien(a);
+        bool pausado = token.paused();
         vm.prank(emisor);
-        try token.mint(a, n % 1000) { _registrar(address(0), true, a, ok); } catch {}
+        try token.mint(a, n % 1000) { _registrar(address(0), true, a, ok, pausado); } catch {}
     }
 
     function transfer(uint256 i, uint256 j, uint256 n) external {
@@ -71,8 +96,9 @@ contract TepuyHandler {
         address to = _actor(j);
         bool fromOk = _bien(from);
         bool toOk = _bien(to);
+        bool pausado = token.paused();
         vm.prank(from);
-        try token.transfer(to, n % 1000) { _registrar(from, fromOk, to, toOk); } catch {}
+        try token.transfer(to, n % 1000) { _registrar(from, fromOk, to, toOk, pausado); } catch {}
     }
 
     function transferFrom(uint256 i, uint256 j, uint256 n) external {
@@ -83,8 +109,9 @@ contract TepuyHandler {
         token.approve(SPENDER, n);
         bool fromOk = _bien(from);
         bool toOk = _bien(to);
+        bool pausado = token.paused();
         vm.prank(SPENDER);
-        try token.transferFrom(from, to, n) { _registrar(from, fromOk, to, toOk); } catch {}
+        try token.transferFrom(from, to, n) { _registrar(from, fromOk, to, toOk, pausado); } catch {}
     }
 
     function sumaSaldos() external view returns (uint256 t) {

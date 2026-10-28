@@ -5,6 +5,7 @@ import {Test} from "forge-std/Test.sol";
 import {IAccessControl} from "@openzeppelin/contracts/access/IAccessControl.sol";
 import {IAccessControlDefaultAdminRules as IRules} from "@openzeppelin/contracts/access/extensions/IAccessControlDefaultAdminRules.sol";
 import {IERC20Errors} from "@openzeppelin/contracts/interfaces/draft-IERC6093.sol";
+import {Pausable} from "@openzeppelin/contracts/utils/Pausable.sol";
 import {Tepuy} from "../contracts/Tepuy.sol";
 
 contract TepuyTest is Test {
@@ -615,5 +616,128 @@ contract TepuyTest is Test {
         _attest(1);
         vm.expectRevert(abi.encodeWithSelector(Tepuy.TopeExcedido.selector, 2, 1));
         _mintTo(otro, 2); // otro sin KYC y fuera de tope
+    }
+
+    function _pause() internal {
+        vm.prank(sup);
+        token.pause();
+    }
+
+    function test_pauseOnlySupervisor() public {
+        bytes32 role = token.SUPERVISOR();
+        address[5] memory otros = [admin, kyc, cust, emisor, otro];
+        for (uint256 i; i < 5; i++) {
+            _unauth(otros[i], role);
+            vm.prank(otros[i]);
+            token.pause();
+        }
+        _pause();
+        for (uint256 i; i < 5; i++) {
+            _unauth(otros[i], role);
+            vm.prank(otros[i]);
+            token.unpause();
+        }
+        assertTrue(token.paused());
+    }
+
+    function test_pausedBlocksMintTransferTransferFrom() public {
+        address spender = makeAddr("spender");
+        _verify(otro);
+        _mintTo(user, 10);
+        vm.prank(user);
+        token.approve(spender, 10);
+        _pause();
+        vm.expectRevert(Pausable.EnforcedPause.selector);
+        _mintTo(user, 1);
+        vm.expectRevert(Pausable.EnforcedPause.selector);
+        vm.prank(user);
+        token.transfer(otro, 1);
+        vm.expectRevert(Pausable.EnforcedPause.selector);
+        vm.prank(spender);
+        token.transferFrom(user, otro, 1);
+        assertEq(token.balanceOf(user), 10);
+        assertEq(token.totalSupply(), 10);
+    }
+
+    function test_pausedAllowsKycFreezeAttest() public {
+        _pause();
+        vm.prank(kyc);
+        token.setVerified(otro, true);
+        assertTrue(token.isVerified(otro));
+        _freeze(otro, true);
+        assertTrue(token.isFrozen(otro));
+        _attest(77);
+        assertEq(token.accionesAtestiguadas(), 77);
+    }
+
+    function test_unpauseRestores() public {
+        _verify(otro);
+        _mintTo(user, 10);
+        _pause();
+        vm.prank(sup);
+        token.unpause();
+        assertFalse(token.paused());
+        vm.prank(user);
+        token.transfer(otro, 4);
+        _mintTo(user, 1);
+        assertEq(token.balanceOf(otro), 4);
+        assertEq(token.balanceOf(user), 7);
+    }
+
+    function test_pauseTwiceAndUnpauseWithoutPauseRevert() public {
+        vm.expectRevert(Pausable.ExpectedPause.selector);
+        vm.prank(sup);
+        token.unpause();
+        _pause();
+        vm.expectRevert(Pausable.EnforcedPause.selector);
+        _pause();
+    }
+
+    function test_pauseEmitsEvents() public {
+        vm.expectEmit(false, false, false, true, address(token));
+        emit Pausable.Paused(sup);
+        _pause();
+        vm.expectEmit(false, false, false, true, address(token));
+        emit Pausable.Unpaused(sup);
+        vm.prank(sup);
+        token.unpause();
+    }
+
+    /// La pausa se evalúa antes que KYC y congelamiento; el tope sigue siendo previo a todo en mint.
+    function test_pauseCheckedBeforeKycAndFreeze() public {
+        _mintTo(user, 10);
+        _freeze(user, true);
+        _pause();
+        vm.expectRevert(Pausable.EnforcedPause.selector);
+        _mintTo(otro, 1); // otro sin KYC
+        vm.expectRevert(Pausable.EnforcedPause.selector);
+        vm.prank(user);
+        token.transfer(otro, 1); // congelada y receptor sin KYC
+        _attest(10);
+        vm.expectRevert(abi.encodeWithSelector(Tepuy.TopeExcedido.selector, 1, 0));
+        _mintTo(user, 1);
+    }
+
+    /// Ambos verificados, solo el emisor congelado: la pausa gana sobre el congelamiento.
+    function test_pauseBeatsFreezeWhenBothVerified() public {
+        _verify(otro);
+        _mintTo(user, 10);
+        _freeze(user, true);
+        _pause();
+        vm.expectRevert(Pausable.EnforcedPause.selector);
+        vm.prank(user);
+        token.transfer(otro, 1);
+    }
+
+    function testFuzz_pausedNeverMoves(address to, uint256 amount) public {
+        vm.assume(to != address(0));
+        _mintTo(user, 10);
+        _pause();
+        vm.expectRevert(Pausable.EnforcedPause.selector);
+        vm.prank(user);
+        token.transfer(to, amount);
+        vm.expectRevert(Pausable.EnforcedPause.selector);
+        _mintTo(to, amount % 100);
+        assertEq(token.totalSupply(), 10);
     }
 }

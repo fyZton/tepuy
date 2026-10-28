@@ -9,9 +9,10 @@ try {
   if (!address || !abi || !Object.keys(roles).length || !Array.isArray(verificados)) throw new Error("deployment.json incompleto");
   const provider = new JsonRpcProvider("http://127.0.0.1:8545", undefined, { staticNetwork: true });
   const token = new Contract(address, abi, provider);
-  const [name, symbol, decimals, supply, attested] = await Promise.all([
-    token.name(), token.symbol(), token.decimals(), token.totalSupply(), token.accionesAtestiguadas(),
+  const [name, symbol, decimals, supply, attested, pausado] = await Promise.all([
+    token.name(), token.symbol(), token.decimals(), token.totalSupply(), token.accionesAtestiguadas(), token.paused(),
   ]);
+  $("mercado").textContent = pausado ? "Pausado por el supervisor" : "Abierto";
   $("name").textContent = name;
   $("symbol").textContent = symbol;
   $("decimals").textContent = decimals.toString();
@@ -37,7 +38,7 @@ try {
 } catch (e) {
   console.error(e);
   $("uso").value = 0;
-  for (const id of ["name", "symbol", "decimals", "supply", "attested", "usoPct"]) $(id).textContent = "—";
+  for (const id of ["name", "symbol", "decimals", "supply", "attested", "usoPct", "mercado"]) $(id).textContent = "—";
   $("error").textContent = "No se pudo leer el contrato. Verifica que el nodo local (http://127.0.0.1:8545) esté encendido y que hayas ejecutado el despliegue.";
   $("error").hidden = false;
 }

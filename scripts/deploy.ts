@@ -60,6 +60,7 @@ const abi = [
   "function isVerified(address) view returns (bool)",
   "function isFrozen(address) view returns (bool)",
   "function accionesAtestiguadas() view returns (uint256)",
+  "function paused() view returns (bool)",
 ];
 writeFileSync(fileURLToPath(new URL("../web/deployment.json", import.meta.url)), JSON.stringify({
   chainId: Number(chainId),

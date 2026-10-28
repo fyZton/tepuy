@@ -2,13 +2,14 @@
 pragma solidity 0.8.28;
 
 import {ERC20} from "@openzeppelin/contracts/token/ERC20/ERC20.sol";
+import {Pausable} from "@openzeppelin/contracts/utils/Pausable.sol";
 import {AccessControlDefaultAdminRules} from "@openzeppelin/contracts/access/extensions/AccessControlDefaultAdminRules.sol";
 
 /// @title Tepuy Demo (TPUY)
 /// @author Luis
 /// @notice Demo de portafolio. No es un producto oficial ni está afiliado a la
 /// Bolsa de Valores de Caracas, la CVV ni SUNAVAL.
-contract Tepuy is ERC20, AccessControlDefaultAdminRules {
+contract Tepuy is ERC20, Pausable, AccessControlDefaultAdminRules {
     /// @notice Rol autorizado a emitir acciones.
     bytes32 public constant EMISOR = keccak256("EMISOR");
 
@@ -146,15 +147,36 @@ contract Tepuy is ERC20, AccessControlDefaultAdminRules {
         emit CongelamientoCambiado(cuenta, congelada, msg.sender);
     }
 
-    // Único punto de reglas. Orden: KYC (from, to) y luego congelamiento (from, to).
+    /// @notice Pausa transferencias y emisión; solo SUPERVISOR. Revierte si ya está pausado (a diferencia de setVerified/setAddressFrozen, que no hacen nada). KYC, congelamiento y atestiguación siguen activos.
+    function pause() external onlyRole(SUPERVISOR) {
+        _pause();
+    }
+
+    /// @notice Reanuda el mercado; solo SUPERVISOR.
+    function unpause() external onlyRole(SUPERVISOR) {
+        _unpause();
+    }
+
+    // Único punto de reglas. Orden: pausa (la más general), KYC (from, to) y luego congelamiento (from, to).
+    // S7 usará un camino interno que salta solo pausa y congelamiento, manteniendo el KYC del receptor.
     // Quemar (to == 0) no exige KYC ni congelamiento del receptor, pero sí del emisor.
     // Quitar KYC a quien tiene saldo lo bloquea hasta que el RECUPERADOR lo mueva (S7).
     // El spender de transferFrom no necesita KYC: solo importan from y to.
     function _update(address from, address to, uint256 value) internal override {
-        if (from != address(0) && !_verificados[from]) revert NoVerificado(from);
-        if (to != address(0) && !_verificados[to]) revert NoVerificado(to);
+        _requireNotPaused();
+        if (from != address(0)) _exigirKyc(from);
+        if (to != address(0)) _exigirKyc(to);
         if (from != address(0) && _congeladas[from]) revert CuentaCongelada(from);
         if (to != address(0) && _congeladas[to]) revert CuentaCongelada(to);
+        _mover(from, to, value);
+    }
+
+    function _exigirKyc(address cuenta) private view {
+        if (!_verificados[cuenta]) revert NoVerificado(cuenta);
+    }
+
+    // Punto de movimiento sin reglas: solo lo llama _update (S7 tendrá su propia vía con KYC del receptor).
+    function _mover(address from, address to, uint256 value) private {
         super._update(from, to, value);
     }
 }

@@ -8,6 +8,7 @@ test("la página muestra Tepuy Demo y suministro 1000", async ({ page }) => {
   await expect(page.locator("#supply")).toHaveText("1000");
   await expect(page.locator("#attested")).toHaveText("10000");
   await expect(page.locator("#usoPct")).toHaveText("10%");
+  await expect(page.locator("#mercado")).toHaveText("Abierto");
   await expect(page.getByRole("note")).toContainText("No es un producto oficial");
 });
 
