@@ -22,3 +22,6 @@ playwright-report/
 .monitor-estado.json
 web/deployment.simArbitrum.json
 web/deployment.simAjena.json
+
+# Documentación interna (no se publica)
+docs/

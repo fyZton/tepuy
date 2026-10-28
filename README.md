@@ -105,8 +105,6 @@ Ojo: en `npm run demo` el simulador publica precios inventados cada cierto tiemp
 | ORACULO | Publica el cierre diario con el SHA-256 del archivo. |
 | RECUPERADOR | Transferencia forzada y recuperación de cuentas, con motivo (con orden judicial en la vida real). |
 
-Qué puede hacer cada rol si roban su clave: [docs/SECURITY.md](docs/SECURITY.md).
-
 ## Pruebas
 
 | Qué | Comando | Resultado |
@@ -122,13 +120,12 @@ Para Python: `python -m venv .venv` y `pip install -r requirements.txt`.
 
 - Slither: 0 resultados. solhint: 0. Cobertura de `Tepuy.sol`: 100 % de líneas y ramas.
 - 9 invariantes con 256 corridas de profundidad 64 (suministro dentro del tope, nadie sin KYC recibe, snapshots inmutables, un dividendo no se paga dos veces, entre otras).
-- Modelo de amenazas por rol y límites conocidos: [docs/SECURITY.md](docs/SECURITY.md). Decisiones de diseño: [docs/SDD.md](docs/SDD.md).
 
 **Es un prototipo sin auditoría externa.** No lo use con fondos ni datos reales. El DEFAULT_ADMIN puede otorgarse cualquier rol; CUSTODIO y EMISOR coludidos pueden emitir sin respaldo; el RECUPERADOR puede mover cualquier saldo hacia una cuenta verificada.
 
 ## Despliegue
 
-Los pasos para Arbitrum Sepolia (testnet) están en [docs/DESPLIEGUE.md](docs/DESPLIEGUE.md). Sin `CONFIRM_DEPLOY=yes` el script solo imprime el plan y no envía nada.
+Preparado para Arbitrum Sepolia (testnet), con las claves en variables de entorno (ver `.env.example`). Sin `CONFIRM_DEPLOY=yes` el script solo imprime el plan y no envía nada.
 
 Todavía no hay nada desplegado en ninguna red pública.
 
