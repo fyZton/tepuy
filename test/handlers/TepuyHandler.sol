@@ -30,6 +30,9 @@ contract TepuyHandler {
     uint256 public supplyPausa;
     uint256 public saldosPausa;
     mapping(address => bool) public recibioSinKyc;
+    uint256 public violacionesSnapshot; // snapshot con id o suministro de corte incorrecto; debe quedar en 0
+    uint256[] public snapSupply; // fantasma: suministro al crear cada snapshot
+    uint256[4][] private _snapSaldos; // fantasma: saldos de los actores al crear cada snapshot
 
     constructor(Tepuy t, address emisor_, address agente_, address supervisor_, address custodio_, address recuperador_, address oraculo_) {
         token = t;
@@ -198,5 +201,29 @@ contract TepuyHandler {
             fechaMax = fp;
             publicaciones++;
         } catch {}
+    }
+
+    // Avanza de 1 a 4 bloques y toma un snapshot; las acciones siguientes pueden caer en el mismo bloque.
+    function snapshot(uint256 seed) external {
+        vm.roll(block.number + 1 + seed % 4); // >= 1: lo anterior queda en bloques cerrados (el corte es el bloque previo)
+        vm.prank(emisor);
+        uint256 id = token.snapshot();
+        uint256[4] memory saldos;
+        for (uint256 i; i < 4; i++) saldos[i] = token.balanceOf(actores[i]);
+        snapSupply.push(token.totalSupply());
+        _snapSaldos.push(saldos);
+        if (id != snapSupply.length || token.totalSupplyAt(id) != token.totalSupply()) violacionesSnapshot++;
+    }
+
+    function roll(uint256 seed) external {
+        vm.roll(block.number + seed % 4);
+    }
+
+    function snapshots() external view returns (uint256) {
+        return snapSupply.length;
+    }
+
+    function snapSaldo(uint256 idx, uint256 i) external view returns (uint256) {
+        return _snapSaldos[idx][i];
     }
 }

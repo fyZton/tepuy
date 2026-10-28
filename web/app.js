@@ -76,6 +76,25 @@ try {
     // KYC primero, igual que en _update.
     fila.insertCell().textContent = !ok ? "No verificado" : congelada ? "Congelado" : "Activo";
   }
+  try {
+    const n = await token.snapshotCount();
+    $("snap-vacio").textContent = "Aún no hay fecha de registro";
+    if (n > 0n) {
+      const bloque = await token.snapshotBlock(n);
+      $("snap-titulo").textContent = `Snapshot #${n} en el bloque ${bloque} (saldos al cierre de ese bloque, ya definitivo)`;
+      $("snap-saldos").tBodies[0].replaceChildren();
+      for (const dir of verificados) {
+        const [corte, actual] = await Promise.all([token.balanceOfAt(dir, n), token.balanceOf(dir)]);
+        const fila = $("snap-saldos").tBodies[0].insertRow();
+        for (const t of [dir, corte, actual]) fila.insertCell().textContent = t.toString();
+      }
+      $("snap-vacio").hidden = true;
+      $("snap").hidden = false;
+    }
+  } catch (e) {
+    console.error(e);
+    $("snap-vacio").textContent = "No se pudo leer la fecha de registro.";
+  }
   const [forzadas, recuperadas] = await Promise.all([
     token.queryFilter(token.filters.TransferenciaForzada()),
     token.queryFilter(token.filters.CuentaRecuperada()),
@@ -97,7 +116,7 @@ try {
 } catch (e) {
   console.error(e);
   $("uso").value = 0;
-  for (const id of ["name", "symbol", "decimals", "supply", "attested", "usoPct", "mercado", "forzados-vacio", "precio-vacio"]) $(id).textContent = "—";
+  for (const id of ["name", "symbol", "decimals", "supply", "attested", "usoPct", "mercado", "forzados-vacio", "precio-vacio", "snap-vacio"]) $(id).textContent = "—";
   $("error").textContent = "No se pudo leer el contrato. Verifica que el nodo local (http://127.0.0.1:8545) esté encendido y que hayas ejecutado el despliegue.";
   $("error").hidden = false;
   $("precio").hidden = true;

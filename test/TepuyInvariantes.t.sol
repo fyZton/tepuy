@@ -178,4 +178,38 @@ contract TepuyInvariantes is Test {
         assertEq(handler.publicaciones(), 2);
         assertEq(handler.violacionesPrecio(), 0);
     }
+
+    /// Cada corte cerrado conserva suministro y saldos de cuando se creó, y los saldos del corte suman su suministro.
+    function invariant_snapshotsImmutable() public view {
+        assertEq(handler.violacionesSnapshot(), 0);
+        for (uint256 i; i < handler.snapshots(); i++) {
+            uint256 id = i + 1;
+            assertEq(token.balanceOfAt(address(0), id), 0);
+            assertEq(token.balanceOfAt(handler.emisor(), id), 0);
+            assertEq(token.balanceOfAt(handler.recuperador(), id), 0);
+            uint256 suma;
+            for (uint256 k; k < 4; k++) {
+                uint256 s = token.balanceOfAt(handler.actores(k), id);
+                assertEq(s, handler.snapSaldo(i, k));
+                suma += s;
+            }
+            assertEq(token.totalSupplyAt(id), handler.snapSupply(i));
+            assertEq(suma, token.totalSupplyAt(id));
+        }
+    }
+
+    /// No vacuidad de S9: el corte guarda el estado aunque luego se mueva todo, incluso por la vía forzada.
+    function test_handlerSnapshotWorks() public {
+        handler.mint(0, 10);
+        handler.snapshot(1);
+        handler.transfer(0, 1, 4); // mismo bloque que el snapshot
+        handler.forcedTransfer(4, 1, 3);
+        handler.mint(1, 5);
+        assertEq(handler.snapshots(), 1);
+        assertEq(token.balanceOfAt(handler.actores(0), 1), 10);
+        assertEq(token.balanceOfAt(handler.actores(1), 1), 0);
+        assertEq(token.totalSupplyAt(1), 10);
+        assertEq(handler.violacionesSnapshot(), 0);
+        invariant_snapshotsImmutable();
+    }
 }

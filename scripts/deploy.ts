@@ -31,6 +31,8 @@ for (const v of verificados) await (await tepuy.connect(agenteKyc).setVerified(v
 // El custodio atestigua antes de que el emisor pueda acuñar.
 await (await tepuy.connect(custodio).setAttestedShares(10000)).wait();
 await (await tepuy.connect(emisor).mint(cuentaPrueba.address, 1000)).wait();
+// Fecha de registro de demo (snapshot #1), tras acuñar.
+await (await tepuy.connect(emisor).snapshot()).wait();
 
 await (await tepuy.beginDefaultAdminTransfer(admin.address)).wait();
 // El retraso se cumple avanzando el reloj; en red real esto sería esperar.
@@ -75,6 +77,12 @@ const abi = [
   "function isFrozen(address) view returns (bool)",
   "function accionesAtestiguadas() view returns (uint256)",
   "function paused() view returns (bool)",
+  "function snapshot() returns (uint256)",
+  "function snapshotCount() view returns (uint256)",
+  "function snapshotBlock(uint256) view returns (uint48)",
+  "function balanceOfAt(address, uint256) view returns (uint256)",
+  "function totalSupplyAt(uint256) view returns (uint256)",
+  "event SnapshotCreado(uint256 indexed id, uint48 bloque, address indexed emisor)",
   "function ultimoPrecio() view returns (uint256 centimos, bytes32 sha256Archivo, uint32 fecha, uint64 publicadoEn)",
   "event PrecioPublicado(uint32 indexed fecha, uint256 centimos, bytes32 sha256Archivo, address indexed oraculo)",
   "event TransferenciaForzada(address indexed from, address indexed to, uint256 amount, string motivo, address indexed recuperador)",

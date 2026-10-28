@@ -2,6 +2,8 @@
 pragma solidity 0.8.28;
 
 import {ERC20} from "@openzeppelin/contracts/token/ERC20/ERC20.sol";
+import {Checkpoints} from "@openzeppelin/contracts/utils/structs/Checkpoints.sol";
+import {SafeCast} from "@openzeppelin/contracts/utils/math/SafeCast.sol";
 import {Pausable} from "@openzeppelin/contracts/utils/Pausable.sol";
 import {AccessControlDefaultAdminRules} from "@openzeppelin/contracts/access/extensions/AccessControlDefaultAdminRules.sol";
 
@@ -10,6 +12,8 @@ import {AccessControlDefaultAdminRules} from "@openzeppelin/contracts/access/ext
 /// @notice Demo de portafolio. No es un producto oficial ni está afiliado a la
 /// Bolsa de Valores de Caracas, la CVV ni SUNAVAL.
 contract Tepuy is ERC20, Pausable, AccessControlDefaultAdminRules {
+    using Checkpoints for Checkpoints.Trace208;
+
     /// @notice Rol autorizado a emitir acciones.
     bytes32 public constant EMISOR = keccak256("EMISOR");
 
@@ -84,6 +88,8 @@ contract Tepuy is ERC20, Pausable, AccessControlDefaultAdminRules {
 
     /// @notice Se intentó emitir más que el tope atestiguado.
     error TopeExcedido(uint256 solicitado, uint256 disponible);
+    /// @notice La atestiguación supera uint208 (límite de los checkpoints).
+    error AtestiguacionExcesiva(uint256 nuevas);
     /// @notice La atestiguación nueva es menor que el suministro.
     error AtestiguacionInsuficiente(uint256 nuevas, uint256 suministro);
 
@@ -128,6 +134,20 @@ contract Tepuy is ERC20, Pausable, AccessControlDefaultAdminRules {
     /// @notice Último precio de cierre (getter con campos individuales; vacío antes de la primera publicación).
     Precio public ultimoPrecio;
 
+    /// @notice El snapshot no existe (id 0 o aún no creado).
+    error SnapshotInexistente(uint256 id);
+
+    /// @notice El EMISOR fijó una fecha de registro.
+    /// @param id Id del snapshot (desde 1).
+    /// @param bloque Bloque de corte (el anterior al de la transacción).
+    /// @param emisor Quien lo creó.
+    event SnapshotCreado(uint256 indexed id, uint48 bloque, address indexed emisor); // solhint-disable-line gas-indexed-events
+
+    // Reloj de los checkpoints = número de bloque (monótono y sin depender del timestamp).
+    mapping(address => Checkpoints.Trace208) private _saldos;
+    Checkpoints.Trace208 private _suministro;
+    uint48[] private _bloques; // _bloques[id - 1] = bloque del snapshot id
+
     mapping(address => bool) private _verificados;
     mapping(address => bool) private _congeladas;
     mapping(address => bool) private _recuperadas;
@@ -170,6 +190,7 @@ contract Tepuy is ERC20, Pausable, AccessControlDefaultAdminRules {
     /// @dev Confianza: CUSTODIO+EMISOR coludidos pueden sobreemitir; un CUSTODIO malicioso puede bloquear emisión.
     /// @param nuevas Nueva cantidad atestiguada.
     function setAttestedShares(uint256 nuevas) external onlyRole(CUSTODIO) {
+        if (nuevas > type(uint208).max) revert AtestiguacionExcesiva(nuevas);
         if (nuevas < totalSupply()) revert AtestiguacionInsuficiente(nuevas, totalSupply());
         uint256 anterior = accionesAtestiguadas;
         if (anterior == nuevas) return; // sin cambio: sin escritura ni evento
@@ -214,6 +235,49 @@ contract Tepuy is ERC20, Pausable, AccessControlDefaultAdminRules {
         return uint32(anio * 10000 + mes * 100 + dia);
     }
     // slither-disable-end divide-before-multiply,timestamp
+
+    /// @notice Fija una fecha de registro; solo EMISOR (decide él la fecha). Funciona en pausa.
+    /// @dev El corte es el bloque ANTERIOR (block.number - 1): ya está cerrado, así que es definitivo al crearse y nada del bloque actual lo altera. En Arbitrum block.number es el del L1. Movimientos del mismo bloque, antes o después de snapshot(), no cuentan.
+    /// @return id Id del snapshot (empieza en 1).
+    function snapshot() external onlyRole(EMISOR) returns (uint256 id) {
+        uint48 corte = uint48(block.number - 1);
+        _bloques.push(corte);
+        id = _bloques.length;
+        emit SnapshotCreado(id, corte, msg.sender);
+    }
+
+    /// @notice Saldo de una cuenta al final del bloque de corte del snapshot.
+    /// @param cuenta Cuenta a consultar.
+    /// @param id Id del snapshot.
+    /// @return Saldo en ese corte.
+    function balanceOfAt(address cuenta, uint256 id) external view returns (uint256) {
+        return _saldos[cuenta].upperLookup(_bloque(id));
+    }
+
+    /// @notice Suministro total al final del bloque de corte del snapshot.
+    /// @param id Id del snapshot.
+    /// @return Suministro en ese corte.
+    function totalSupplyAt(uint256 id) external view returns (uint256) {
+        return _suministro.upperLookup(_bloque(id));
+    }
+
+    /// @notice Cantidad de snapshots creados (el último id).
+    /// @return Total de snapshots.
+    function snapshotCount() external view returns (uint256) {
+        return _bloques.length;
+    }
+
+    /// @notice Bloque de corte de un snapshot (último bloque incluido).
+    /// @param id Id del snapshot.
+    /// @return Número de bloque.
+    function snapshotBlock(uint256 id) external view returns (uint48) {
+        return _bloque(id);
+    }
+
+    function _bloque(uint256 id) private view returns (uint48) {
+        if (id == 0 || id > _bloques.length) revert SnapshotInexistente(id);
+        return _bloques[id - 1];
+    }
 
     /// @notice Indica si la cuenta pasó KYC (nombre ERC-3643).
     /// @param cuenta Cuenta a consultar.
@@ -343,7 +407,14 @@ contract Tepuy is ERC20, Pausable, AccessControlDefaultAdminRules {
     }
 
     // Punto de movimiento sin reglas: solo lo llaman _update y _forzar (que valida el receptor).
+    // Aquí se escriben los checkpoints: ningún camino (normal, mint, forzado) los salta.
     function _mover(address from, address to, uint256 value) private {
         super._update(from, to, value);
+        uint48 b = uint48(block.number); // el tope uint208 de la atestiguación evita el revert; SafeCast es defensa en profundidad
+        // slither-disable-start unused-return
+        if (from == address(0) || to == address(0)) _suministro.push(b, SafeCast.toUint208(totalSupply()));
+        if (from != address(0)) _saldos[from].push(b, SafeCast.toUint208(balanceOf(from)));
+        if (to != address(0)) _saldos[to].push(b, SafeCast.toUint208(balanceOf(to)));
+        // slither-disable-end unused-return
     }
 }

@@ -601,6 +601,7 @@ contract TepuyTest is Test {
     }
 
     function testFuzz_mintRespectsCap(uint256 tope, uint256 amount) public {
+        tope = bound(tope, 0, type(uint208).max); // setAttestedShares rechaza más (AtestiguacionExcesiva)
         _attest(tope);
         if (amount > tope) vm.expectRevert(abi.encodeWithSelector(Tepuy.TopeExcedido.selector, amount, tope));
         _mintTo(user, amount);

@@ -50,6 +50,15 @@ test("muestra el precio de MVZ.A del fixture con su hash real", async ({ page })
   await expect(page.locator("#precio-aviso")).toBeHidden();
 });
 
+test("muestra el snapshot #1 con el saldo de la fecha de registro", async ({ page }) => {
+  await page.goto("/");
+  await expect(page.locator("#snap-titulo")).toContainText("Snapshot #1");
+  const filas = page.locator("#snap-saldos tbody tr");
+  await expect(filas).toHaveCount(2);
+  await expect(filas.nth(0).locator("td").nth(1)).toHaveText("1000");
+  await expect(filas.nth(1).locator("td").nth(1)).toHaveText("0");
+});
+
 test("muestra un error si el nodo no responde", async ({ page }) => {
   await page.route("http://127.0.0.1:8545/**", (route) => route.abort());
   await page.goto("/");
