@@ -5,8 +5,8 @@ const $ = (id) => document.getElementById(id);
 try {
   const respuesta = await fetch("deployment.json");
   if (!respuesta.ok) throw new Error(`deployment.json: ${respuesta.status}`);
-  const { address, abi, roles = {} } = await respuesta.json();
-  if (!address || !abi || !Object.keys(roles).length) throw new Error("deployment.json incompleto");
+  const { address, abi, roles = {}, verificados } = await respuesta.json();
+  if (!address || !abi || !Object.keys(roles).length || !Array.isArray(verificados)) throw new Error("deployment.json incompleto");
   const provider = new JsonRpcProvider("http://127.0.0.1:8545", undefined, { staticNetwork: true });
   const token = new Contract(address, abi, provider);
   const [name, symbol, decimals, supply] = await Promise.all([
@@ -20,6 +20,13 @@ try {
     const fila = $("roles").tBodies[0].insertRow();
     fila.insertCell().textContent = rol;
     fila.insertCell().textContent = dir;
+  }
+  // Se lee isVerified en cadena: el JSON solo sugiere candidatos.
+  for (const dir of verificados) {
+    const [ok, saldo] = await Promise.all([token.isVerified(dir), token.balanceOf(dir)]);
+    const fila = $("verificados").tBodies[0].insertRow();
+    fila.insertCell().textContent = dir;
+    fila.insertCell().textContent = ok ? saldo.toString() : "no verificado";
   }
 } catch (e) {
   console.error(e);

@@ -29,6 +29,20 @@ contract Tepuy is ERC20, AccessControlDefaultAdminRules {
     /// @notice El retraso es menor que RETRASO_MINIMO.
     error RetrasoInsuficiente(uint48 dado, uint48 minimo);
 
+    /// @notice La cuenta no está verificada (KYC).
+    error NoVerificado(address cuenta);
+    /// @notice La dirección cero no puede verificarse.
+    error CuentaInvalida();
+
+    // Indexar un bool no sirve: se desactiva gas-indexed-events en el evento.
+    /// @notice Cambió el estado KYC de una cuenta.
+    /// @param cuenta Cuenta afectada.
+    /// @param verificado Nuevo estado.
+    /// @param agente Quien lo cambió.
+    event VerificacionCambiada(address indexed cuenta, bool verificado, address indexed agente); // solhint-disable-line gas-indexed-events
+
+    mapping(address => bool) private _verificados;
+
     constructor(uint48 initialDelay, address initialAdmin)
         ERC20("Tepuy Demo", "TPUY")
         AccessControlDefaultAdminRules(initialDelay, initialAdmin)
@@ -56,5 +70,31 @@ contract Tepuy is ERC20, AccessControlDefaultAdminRules {
     /// @param amount Cantidad de acciones.
     function mint(address to, uint256 amount) external onlyRole(EMISOR) {
         _mint(to, amount);
+    }
+
+    /// @notice Indica si la cuenta pasó KYC (nombre ERC-3643).
+    /// @param cuenta Cuenta a consultar.
+    /// @return Si está verificada.
+    function isVerified(address cuenta) public view returns (bool) {
+        return _verificados[cuenta];
+    }
+
+    /// @notice Marca o desmarca a una cuenta como verificada; solo AGENTE_KYC. Sin datos personales on-chain.
+    /// @param cuenta Cuenta a cambiar.
+    /// @param verificado Nuevo estado.
+    function setVerified(address cuenta, bool verificado) external onlyRole(AGENTE_KYC) {
+        if (cuenta == address(0)) revert CuentaInvalida();
+        if (_verificados[cuenta] == verificado) return; // sin cambio: sin escritura ni evento
+        _verificados[cuenta] = verificado;
+        emit VerificacionCambiada(cuenta, verificado, msg.sender);
+    }
+
+    // Único punto de reglas. Quemar no exige KYC del receptor (to == 0) pero sí del emisor.
+    // Quitar KYC a quien tiene saldo lo bloquea hasta que el RECUPERADOR lo mueva (S7).
+    // El spender de transferFrom no necesita KYC: solo importan from y to.
+    function _update(address from, address to, uint256 value) internal override {
+        if (from != address(0) && !_verificados[from]) revert NoVerificado(from);
+        if (to != address(0) && !_verificados[to]) revert NoVerificado(to);
+        super._update(from, to, value);
     }
 }

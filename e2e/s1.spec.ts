@@ -17,6 +17,17 @@ test("la tabla de roles tiene 7 filas", async ({ page }) => {
   expect(new Set(dirs).size).toBe(7);
 });
 
+test("muestra 2 inversionistas verificados con saldo 1000 y 0", async ({ page }) => {
+  await page.goto("/");
+  const filas = page.locator("#verificados tbody tr");
+  await expect(filas).toHaveCount(2);
+  await expect(filas.nth(0).locator("td").nth(1)).toHaveText("1000");
+  await expect(filas.nth(1).locator("td").nth(1)).toHaveText("0");
+  const dirs = await page.locator("#verificados tbody td:first-child").allTextContents();
+  expect(dirs.every((d) => /^0x[0-9a-fA-F]{40}$/.test(d))).toBe(true);
+  expect(new Set(dirs).size).toBe(2);
+});
+
 test("muestra un error si el nodo no responde", async ({ page }) => {
   await page.route("http://127.0.0.1:8545/**", (route) => route.abort());
   await page.goto("/");

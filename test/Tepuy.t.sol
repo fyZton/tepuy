@@ -12,12 +12,132 @@ contract TepuyTest is Test {
     address admin = makeAddr("admin");
     address emisor = makeAddr("emisor");
     address user = makeAddr("user");
+    address kyc = makeAddr("kyc");
+    address otro = makeAddr("otro");
 
     function setUp() public {
         token = new Tepuy(1 days, admin);
         bytes32 role = token.EMISOR();
         vm.prank(admin);
         token.grantRole(role, emisor);
+        bytes32 kycRole = token.AGENTE_KYC();
+        vm.prank(admin);
+        token.grantRole(kycRole, kyc);
+        vm.prank(kyc);
+        token.setVerified(user, true);
+    }
+
+    function _unauth(address who, bytes32 role) internal {
+        vm.expectRevert(abi.encodeWithSelector(IAccessControl.AccessControlUnauthorizedAccount.selector, who, role));
+    }
+
+    function _mintTo(address to, uint256 n) internal {
+        vm.prank(emisor);
+        token.mint(to, n);
+    }
+
+    function test_mintToUnverifiedReverts() public {
+        vm.expectRevert(abi.encodeWithSelector(Tepuy.NoVerificado.selector, otro));
+        _mintTo(otro, 1);
+    }
+
+    function test_transferToUnverifiedReverts() public {
+        _mintTo(user, 10);
+        vm.expectRevert(abi.encodeWithSelector(Tepuy.NoVerificado.selector, otro));
+        vm.prank(user);
+        token.transfer(otro, 1);
+    }
+
+    function test_transferBetweenVerifiedWorks() public {
+        _mintTo(user, 10);
+        vm.prank(kyc);
+        token.setVerified(otro, true);
+        vm.prank(user);
+        token.transfer(otro, 4);
+        assertEq(token.balanceOf(otro), 4);
+    }
+
+    function test_revokedKycBlocksSendingAndReceiving() public {
+        _mintTo(user, 10);
+        vm.prank(kyc);
+        token.setVerified(user, false);
+        vm.expectRevert(abi.encodeWithSelector(Tepuy.NoVerificado.selector, user));
+        vm.prank(user);
+        token.transfer(user, 1);
+        vm.expectRevert(abi.encodeWithSelector(Tepuy.NoVerificado.selector, user));
+        _mintTo(user, 1);
+        assertEq(token.balanceOf(user), 10); // saldo bloqueado, no perdido
+    }
+
+    function test_transferFromRespectsKycNotSpender() public {
+        address spender = makeAddr("spender"); // sin KYC: no hace falta
+        _mintTo(user, 10);
+        vm.prank(user);
+        token.approve(spender, 10);
+        vm.expectRevert(abi.encodeWithSelector(Tepuy.NoVerificado.selector, otro));
+        vm.prank(spender);
+        token.transferFrom(user, otro, 1);
+
+        vm.prank(kyc);
+        token.setVerified(otro, true);
+        vm.prank(spender);
+        token.transferFrom(user, otro, 1);
+        assertEq(token.balanceOf(otro), 1);
+
+        vm.prank(kyc);
+        token.setVerified(user, false);
+        vm.expectRevert(abi.encodeWithSelector(Tepuy.NoVerificado.selector, user));
+        vm.prank(spender);
+        token.transferFrom(user, otro, 1);
+    }
+
+    function test_setVerifiedOnlyAgent() public {
+        bytes32 role = token.AGENTE_KYC();
+        _unauth(user, role);
+        vm.prank(user);
+        token.setVerified(otro, true);
+        _unauth(admin, role);
+        vm.prank(admin);
+        token.setVerified(otro, true);
+        _unauth(emisor, role);
+        vm.prank(emisor);
+        token.setVerified(otro, true);
+    }
+
+    function test_setVerifiedZeroReverts() public {
+        vm.expectRevert(Tepuy.CuentaInvalida.selector);
+        vm.prank(kyc);
+        token.setVerified(address(0), true);
+    }
+
+    function test_setVerifiedEmitsEvent() public {
+        vm.expectEmit(true, true, false, true, address(token));
+        emit Tepuy.VerificacionCambiada(otro, true, kyc);
+        vm.prank(kyc);
+        token.setVerified(otro, true);
+        assertTrue(token.isVerified(otro));
+    }
+
+    function test_setVerifiedNoChangeEmitsNothing() public {
+        vm.recordLogs();
+        vm.prank(kyc);
+        token.setVerified(user, true); // ya verificado
+        vm.prank(kyc);
+        token.setVerified(otro, false); // ya no verificado
+        assertEq(vm.getRecordedLogs().length, 0);
+        assertTrue(token.isVerified(user));
+        assertFalse(token.isVerified(otro));
+    }
+
+    function testFuzz_unverifiedNeverReceives(address to, uint256 amount) public {
+        vm.assume(to != address(0) && to != user);
+        amount = bound(amount, 1, 1e30);
+        vm.expectRevert(abi.encodeWithSelector(Tepuy.NoVerificado.selector, to));
+        _mintTo(to, amount);
+        _mintTo(user, amount);
+        vm.expectRevert(abi.encodeWithSelector(Tepuy.NoVerificado.selector, to));
+        vm.prank(user);
+        token.transfer(to, amount);
     }
 
     function test_metadata() public view {
@@ -83,6 +203,8 @@ contract TepuyTest is Test {
     function testFuzz_mint(address to, uint256 amount) public {
         vm.assume(to != address(0));
         amount = bound(amount, 0, 1e30);
+        vm.prank(kyc);
+        token.setVerified(to, true);
         vm.prank(emisor);
         token.mint(to, amount);
         assertEq(token.balanceOf(to), amount);
