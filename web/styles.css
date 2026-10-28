@@ -32,6 +32,19 @@ th, td { text-align: left; padding: .5rem; border-bottom: 1px solid var(--linea)
 #feed:empty { display: none; }
 #feed li { display: flex; gap: .75rem; padding: .5rem .75rem; border-bottom: 1px solid var(--linea); animation: entra .4s ease-out; }
 #feed time { color: var(--tenue); font-variant-numeric: tabular-nums; flex: none; }
+#sim { display: grid; grid-template-columns: repeat(auto-fit, minmax(13rem, 1fr)); gap: 1rem; align-items: end; }
+#sim label { display: flex; flex-direction: column; gap: .25rem; font-weight: 600; min-width: 0; }
+#sim label[hidden] { display: none; }
+#sim select, #sim input { font: inherit; padding: .5rem; background: var(--panel); color: var(--texto); border: 1px solid var(--linea); min-width: 0; width: 100%; }
+.sim-botones { display: flex; flex-wrap: wrap; gap: .75rem; grid-column: 1 / -1; }
+.sim-botones button { font: inherit; font-weight: 600; padding: .6rem 1rem; cursor: pointer; border: 2px solid var(--acento); background: var(--acento); color: var(--fondo); }
+.sim-botones button[type=button] { background: transparent; color: var(--acento); }
+#sim-validacion { color: var(--alerta); font-weight: 600; }
+#sim-resultado { margin-top: 1rem; padding: 1rem; border-left: 8px solid var(--acento); background: var(--panel); }
+#sim-resultado.no { border-left-color: var(--alerta); }
+#sim-texto { font-size: 1.4rem; font-weight: 700; margin: 0; }
+#sim-resultado.no #sim-texto { color: var(--alerta); }
+#sim-tecnico { font-family: ui-monospace, monospace; overflow-wrap: anywhere; }
 @keyframes entra { from { background: var(--acento); opacity: .4; } to { background: transparent; opacity: 1; } }
 @media (prefers-reduced-motion: reduce) { #feed li { animation: none; } }
 @media (max-width: 40rem) {

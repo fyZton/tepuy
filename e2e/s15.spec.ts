@@ -8,7 +8,7 @@ test("se ven los textos explicativos y el aviso de demo", async ({ page }) => {
   await page.goto("/");
   await expect(page.getByRole("note")).toContainText("Demo con datos de prueba en una red local");
   await expect(page.getByText("Cada token TPUY representa 1 acción de MVZ.A")).toBeVisible();
-  await expect(page.getByText("¿Qué es esto?")).toHaveCount(8);
+  await expect(page.getByText("¿Qué es esto?")).toHaveCount(9);
   await expect(page.getByText("Emisor (crea acciones)")).toBeVisible();
   await expect(page.getByText("Supervisor (puede pausar todo, como SUNAVAL)")).toBeVisible();
   await expect(page.locator("#verif-n")).toHaveText("2");

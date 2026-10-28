@@ -1,4 +1,4 @@
-import { JsonRpcProvider, Contract } from "./vendor/ethers.min.js";
+import { JsonRpcProvider, Contract, Interface, isAddress } from "./vendor/ethers.min.js";
 
 const $ = (id) => document.getElementById(id);
 const MAX_FEED = 50;
@@ -66,12 +66,126 @@ let token;
 let provider;
 let direccion;
 
+// --- Simulación de transferencias (eth_call; no envía nada) ---
+// El ABI del despliegue no trae errores: se declaran aquí los que puede devolver transfer.
+const ERRORES = new Interface([
+  "error EnforcedPause()",
+  "error NoVerificado(address cuenta)",
+  "error CuentaCongelada(address cuenta)",
+  "error ERC20InsufficientBalance(address sender, uint256 balance, uint256 needed)",
+  "error ERC20InvalidReceiver(address receiver)",
+]);
+const OTRA = "otra";
+let simSinKyc = null; // dirección demo sin KYC (deployment.json)
+let simVerificados = []; // [{ dir, congelada }] verificados en cadena
+const nombreSim = (d) => (d.toLowerCase() === simSinKyc ? "La persona sin verificar" : nombre(d));
+const opcion = (valor, texto) => { const o = document.createElement("option"); o.value = valor; o.textContent = texto; return o; };
+
+// Repinta los selectores conservando lo que la persona había elegido.
+function poblarSim() {
+  const desde = $("sim-desde"), hacia = $("sim-hacia");
+  const [vd, vh] = [desde.value, hacia.value];
+  desde.replaceChildren(...simVerificados.map(({ dir: d }) => opcion(d, nombre(d))));
+  const otros = [...simVerificados.filter((v) => !v.congelada).map(({ dir: d }) => opcion(d, nombre(d)))];
+  if (simSinKyc) otros.push(opcion(simSinKyc, "Una persona sin verificar (demo)"));
+  const congelada = simVerificados.find((v) => v.congelada);
+  if (congelada) otros.push(opcion(congelada.dir, `Una cuenta congelada (${nombre(congelada.dir)})`));
+  otros.push(opcion(OTRA, "Otra dirección…"));
+  hacia.replaceChildren(...otros);
+  for (const [sel, v] of [[desde, vd], [hacia, vh]]) if ([...sel.options].some((o) => o.value === v)) sel.value = v;
+  $("sim-otra-l").hidden = hacia.value !== OTRA;
+  $("sim-rapido").hidden = !simSinKyc || !simVerificados.length;
+}
+
+function mostrarSim(texto, tecnico, ok) {
+  $("sim-validacion").hidden = true;
+  $("sim-texto").textContent = texto;
+  $("sim-tecnico").textContent = tecnico;
+  $("sim-resultado").className = ok ? "" : "no";
+  $("sim-resultado").hidden = false;
+}
+function validacionSim(texto) {
+  $("sim-resultado").hidden = true;
+  $("sim-validacion").textContent = texto;
+  $("sim-validacion").hidden = false;
+}
+
+async function simular() {
+  const desde = $("sim-desde").value;
+  const hacia = $("sim-hacia").value === OTRA ? $("sim-otra").value.trim() : $("sim-hacia").value;
+  const cant = $("sim-cant").value.trim();
+  if (!token) return validacionSim("Todavía no hay conexión con el contrato.");
+  if (!desde) return validacionSim("No hay inversionistas para elegir en «Desde».");
+  if (!isAddress(hacia)) return validacionSim("Esa dirección no es válida. Debe empezar con 0x y tener 42 caracteres.");
+  if (!/^\d+$/.test(cant) || BigInt(cant) < 1n) return validacionSim("La cantidad debe ser un número entero de 1 o más.");
+  const monto = BigInt(cant);
+  $("sim-ir").disabled = true;
+  try {
+    // El ABI del despliegue no trae transfer: se declara aquí.
+    await new Contract(direccion, ["function transfer(address,uint256) returns (bool)"], provider).transfer.staticCall(hacia, monto, { from: desde });
+    mostrarSim(`Permitida: ${nombre(desde)} puede pasarle ${acciones(monto)} a ${nombreSim(hacia)}.`, "El contrato respondió true (simulación, no se envió nada).", true);
+  } catch (e) {
+    let err = null;
+    try { err = e?.data ? ERRORES.parseError(e.data) : null; } catch { err = null; } // revert vacío ("0x") o desconocido
+    if (!err) {
+      console.error(e);
+      return mostrarSim("No se pudo simular: no hubo respuesta clara del contrato.", e?.shortMessage ?? "Error desconocido", false);
+    }
+    const a = err.args;
+    let motivo;
+    switch (err.name) {
+      case "NoVerificado": {
+        const quien = a.cuenta.toLowerCase() === desde.toLowerCase() ? "La persona que envía" : "La persona que recibiría";
+        motivo = `${quien} no está verificada (sin KYC). Solo inversionistas aprobados pueden tener acciones.`;
+        break;
+      }
+      case "CuentaCongelada":
+        motivo = `La cuenta de ${nombreSim(a.cuenta)} está congelada por el supervisor. No puede enviar ni recibir acciones.`;
+        break;
+      case "EnforcedPause":
+        motivo = "El mercado está en pausa. El supervisor detuvo todas las transferencias.";
+        break;
+      case "ERC20InsufficientBalance":
+        motivo = `Saldo insuficiente: ${nombre(a.sender)} tiene ${acciones(a.balance)} y quiere pasar ${acciones(a.needed)}.`;
+        break;
+      case "ERC20InvalidReceiver":
+        motivo = "No se puede enviar a la dirección cero.";
+        break;
+      default:
+        motivo = "El contrato rechazó la transferencia.";
+    }
+    // Una cuenta recuperada queda sin KYC y congelada para siempre: se distingue para explicarlo mejor.
+    if (err.name === "NoVerificado" || err.name === "CuentaCongelada") {
+      try {
+        const rec = new Contract(direccion, ["function isRecovered(address) view returns (bool)"], provider);
+        if (await rec.isRecovered(a.cuenta)) motivo = `La cuenta de ${nombreSim(a.cuenta)} fue recuperada: sus acciones se movieron a una cuenta nueva y esta ya no puede operar.`;
+      } catch (x) { console.error(x); }
+    }
+    mostrarSim(`Rechazada por el contrato: ${motivo}`, `${err.name}(${[...a].map(String).join(", ")})`, false);
+  } finally {
+    $("sim-ir").disabled = false;
+  }
+}
+
+// Se registran antes de cualquier await: el formulario funciona aunque el resto tarde.
+$("sim").addEventListener("submit", (ev) => { ev.preventDefault(); simular(); });
+$("sim-hacia").addEventListener("change", () => { $("sim-otra-l").hidden = $("sim-hacia").value !== OTRA; });
+$("sim-rapido").addEventListener("click", () => {
+  const ana = simVerificados.find((v) => nombre(v.dir).startsWith("Ana")) ?? simVerificados[0];
+  $("sim-desde").value = ana.dir;
+  $("sim-hacia").value = simSinKyc;
+  $("sim-otra-l").hidden = true;
+  $("sim-cant").value = "1";
+  simular();
+});
+
 async function leerConfig() {
   const respuesta = await fetch("deployment.json", { cache: "no-store" });
   if (!respuesta.ok) throw new Error(`deployment.json: ${respuesta.status}`);
   const cfg = await respuesta.json();
   if (!cfg.address || !cfg.abi || !Object.keys(cfg.roles ?? {}).length || !Array.isArray(cfg.verificados)) throw new Error("deployment.json incompleto");
   etiquetas = Object.fromEntries(Object.entries(cfg.etiquetas ?? {}).map(([k, v]) => [k.toLowerCase(), v]));
+  simSinKyc = isAddress(cfg.sinKyc) ? cfg.sinKyc.toLowerCase() : null;
   return cfg;
 }
 
@@ -130,6 +244,8 @@ async function cargar(conEventos) {
     return fila([dir(d), saldo.toString(), !ok ? "No verificado" : congelada ? "Congelado" : "Activo"]);
   }));
   $("verif-n").textContent = estados.filter(([ok]) => ok).length.toString();
+  simVerificados = verificados.filter((_, i) => estados[i][0]).map((d) => ({ dir: d, congelada: estados[verificados.indexOf(d)][1] }));
+  poblarSim();
   try {
     const n = await token.snapshotCount();
     $("snap-vacio").textContent = "Aún no hay fecha de registro";

@@ -48,6 +48,26 @@
       </article>
     </section>
 
+    <section aria-labelledby="t-sim">
+      <h2 id="t-sim">Pruébalo: ¿a quién se le puede pasar una acción?</h2>
+      <p class="ayuda"><strong>¿Qué es esto?</strong> Simulamos una transferencia sin enviarla. El propio contrato decide si la permite. No cambia nada.</p>
+      <form id="sim" novalidate>
+        <label>Desde <select id="sim-desde"></select></label>
+        <label>Hacia <select id="sim-hacia"></select></label>
+        <label id="sim-otra-l" hidden>Dirección <input id="sim-otra" type="text" autocomplete="off" spellcheck="false" placeholder="0x…"></label>
+        <label>Cantidad <input id="sim-cant" type="text" inputmode="numeric" value="1"></label>
+        <div class="sim-botones">
+          <button type="submit" id="sim-ir">Simular transferencia</button>
+          <button type="button" id="sim-rapido" hidden>Probar con alguien sin KYC</button>
+        </div>
+      </form>
+      <p id="sim-validacion" role="alert" hidden></p>
+      <div id="sim-resultado" role="status" hidden>
+        <p id="sim-texto"></p>
+        <p id="sim-tecnico" class="nota"></p>
+      </div>
+    </section>
+
     <section aria-labelledby="t-feed">
       <h2 id="t-feed">Operaciones en vivo</h2>
       <p class="ayuda"><strong>¿Qué es esto?</strong> Cada vez que alguien opera, aparece aquí al instante. Nada se puede borrar ni cambiar después.</p>
