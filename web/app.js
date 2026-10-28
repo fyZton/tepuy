@@ -5,7 +5,8 @@ const $ = (id) => document.getElementById(id);
 try {
   const respuesta = await fetch("deployment.json");
   if (!respuesta.ok) throw new Error(`deployment.json: ${respuesta.status}`);
-  const { address, abi } = await respuesta.json();
+  const { address, abi, roles = {} } = await respuesta.json();
+  if (!address || !abi || !Object.keys(roles).length) throw new Error("deployment.json incompleto");
   const provider = new JsonRpcProvider("http://127.0.0.1:8545", undefined, { staticNetwork: true });
   const token = new Contract(address, abi, provider);
   const [name, symbol, decimals, supply] = await Promise.all([
@@ -15,6 +16,11 @@ try {
   $("symbol").textContent = symbol;
   $("decimals").textContent = decimals.toString();
   $("supply").textContent = supply.toString();
+  for (const [rol, dir] of Object.entries(roles)) {
+    const fila = $("roles").tBodies[0].insertRow();
+    fila.insertCell().textContent = rol;
+    fila.insertCell().textContent = dir;
+  }
 } catch (e) {
   console.error(e);
   for (const id of ["name", "symbol", "decimals", "supply"]) $(id).textContent = "—";
