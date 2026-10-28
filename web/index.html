@@ -1,0 +1,23 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Tepuy Demo</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <div class="banner" role="note">Demo de portafolio. No es un producto oficial de la Bolsa de Valores de Caracas.</div>
+  <main>
+    <h1>Tepuy</h1>
+    <p id="error" role="alert" hidden></p>
+    <dl aria-label="Datos del token" aria-live="polite">
+      <dt>Nombre</dt><dd id="name">Cargando…</dd>
+      <dt>Símbolo</dt><dd id="symbol">Cargando…</dd>
+      <dt>Decimales</dt><dd id="decimals">Cargando…</dd>
+      <dt>Suministro total</dt><dd id="supply">Cargando…</dd>
+    </dl>
+  </main>
+  <script type="module" src="app.js"></script>
+</body>
+</html>

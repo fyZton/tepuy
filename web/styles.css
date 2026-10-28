@@ -1,0 +1,7 @@
+body { font-family: system-ui, sans-serif; margin: 0; background: #fafaf7; color: #1a1a1a; }
+.banner { background: #1a1a1a; color: #fff; padding: .75rem 1rem; text-align: center; font-weight: 600; }
+main { max-width: 32rem; margin: 2rem auto; padding: 0 1rem; }
+dl { display: grid; grid-template-columns: max-content 1fr; gap: .5rem 1.5rem; }
+dt { font-weight: 600; }
+dd { margin: 0; }
+#error { color: #a00000; font-weight: 600; }
