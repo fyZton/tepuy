@@ -10,12 +10,14 @@ contract TepuyInvariantes is Test {
     TepuyHandler handler;
 
     function setUp() public {
+        vm.warp(1793188800); // 28/10/2026 12:00 UTC
         address admin = makeAddr("admin");
         address emisor = makeAddr("emisor");
         address agente = makeAddr("agente");
         address supervisor = makeAddr("supervisor");
         address custodio = makeAddr("custodio");
         address recuperador = makeAddr("recuperador");
+        address oraculo = makeAddr("oraculo");
         token = new Tepuy(1 days, admin);
         bytes32 r1 = token.EMISOR();
         bytes32 r2 = token.AGENTE_KYC();
@@ -27,8 +29,9 @@ contract TepuyInvariantes is Test {
         token.grantRole(r2, agente);
         token.grantRole(r3, supervisor);
         token.grantRole(token.RECUPERADOR(), recuperador);
+        token.grantRole(token.ORACULO(), oraculo);
         vm.stopPrank();
-        handler = new TepuyHandler(token, emisor, agente, supervisor, custodio, recuperador);
+        handler = new TepuyHandler(token, emisor, agente, supervisor, custodio, recuperador, oraculo);
         // Arranque con dos verificados para que haya operaciones exitosas.
         vm.startPrank(agente);
         token.setVerified(handler.actores(0), true);
@@ -152,5 +155,27 @@ contract TepuyInvariantes is Test {
         assertEq(token.balanceOf(handler.actores(1)), 10);
         assertEq(token.balanceOf(handler.actores(0)), 0);
         assertEq(handler.violaciones() + handler.violacionesForzada() + handler.violacionesCongelada(), 0);
+    }
+
+    /// La fecha publicada nunca disminuye y el precio publicado nunca es 0.
+    function invariant_priceMonotonic() public view {
+        assertEq(handler.violacionesPrecio(), 0);
+        (uint256 c,, uint32 f,) = token.ultimoPrecio();
+        assertEq(f, handler.fechaMax());
+        if (f != 0) assertGt(c, 0);
+    }
+
+    /// No vacuidad de S8: publica; igual y anterior se rechazan; precio 0 se rechaza.
+    function test_handlerPriceWorks() public {
+        handler.publishPrice(1, 2, bytes32(uint256(1))); // avanza un día y publica mañana
+        assertEq(handler.publicaciones(), 1);
+        handler.publishPrice(1, 0, bytes32(uint256(1))); // igual: rechazada
+        handler.publishPrice(1, 1, bytes32(uint256(1))); // anterior: rechazada
+        handler.publishPrice(0, 2, bytes32(uint256(1))); // precio 0: rechazada
+        handler.publishPrice(1, 3, bytes32(uint256(1))); // hoy + 3: rechazada por el tope a futuro
+        assertEq(handler.publicaciones(), 1);
+        handler.publishPrice(2, 2, bytes32(uint256(1)));
+        assertEq(handler.publicaciones(), 2);
+        assertEq(handler.violacionesPrecio(), 0);
     }
 }

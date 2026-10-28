@@ -1,3 +1,5 @@
+import { readFileSync } from "node:fs";
+import { createHash } from "node:crypto";
 import { test, expect } from "@playwright/test";
 
 test("la página muestra Tepuy Demo y suministro 1000", async ({ page }) => {
@@ -37,6 +39,15 @@ test("la sección del recuperador aparece sin movimientos", async ({ page }) => 
   await page.goto("/");
   await expect(page.getByRole("heading", { name: "Acciones del recuperador" })).toBeVisible();
   await expect(page.locator("#forzados-vacio")).toHaveText("Sin movimientos forzados");
+});
+
+test("muestra el precio de MVZ.A del fixture con su hash real", async ({ page }) => {
+  const archivo = readFileSync("oraculo/tests/fixtures/20261027.dat");
+  await page.goto("/");
+  await expect(page.locator("#precio-bs")).toContainText("16.999,99");
+  await expect(page.locator("#precio-fecha")).toHaveText("Cierre del 27/10/2026");
+  await expect(page.locator("#precio-hash")).toHaveText("0x" + createHash("sha256").update(archivo).digest("hex"));
+  await expect(page.locator("#precio-aviso")).toBeHidden();
 });
 
 test("muestra un error si el nodo no responde", async ({ page }) => {

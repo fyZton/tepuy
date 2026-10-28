@@ -97,6 +97,37 @@ contract Tepuy is ERC20, Pausable, AccessControlDefaultAdminRules {
     /// @dev Afirmación del CUSTODIO, no prueba de custodia: el tope es tan honesto como él.
     uint256 public accionesAtestiguadas;
 
+    /// @notice La fecha no tiene forma AAAAMMDD válida.
+    error FechaInvalida(uint32 fecha);
+    /// @notice La fecha no es mayor que la última publicada.
+    error FechaNoCreciente(uint32 fecha, uint32 ultima);
+    /// @notice La fecha supera hoy + 2 días (por el reloj del bloque).
+    error FechaFutura(uint32 fecha, uint32 maxima);
+    /// @notice El precio es cero.
+    error PrecioCero();
+    /// @notice El precio supera uint128.
+    error PrecioExcesivo(uint256 centimos);
+    /// @notice El SHA-256 del archivo es cero.
+    error HashVacio();
+
+    /// @notice El ORACULO publicó el precio de cierre de una fecha.
+    /// @param fecha Fecha AAAAMMDD.
+    /// @param centimos Precio en céntimos de Bs.
+    /// @param sha256Archivo SHA-256 del archivo oficial.
+    /// @param oraculo Quien lo publicó.
+    event PrecioPublicado(uint32 indexed fecha, uint256 centimos, bytes32 sha256Archivo, address indexed oraculo); // solhint-disable-line gas-indexed-events
+
+    /// @notice Último precio publicado.
+    struct Precio {
+        uint256 centimos;
+        bytes32 sha256Archivo;
+        uint32 fecha;
+        uint64 publicadoEn;
+    }
+
+    /// @notice Último precio de cierre (getter con campos individuales; vacío antes de la primera publicación).
+    Precio public ultimoPrecio;
+
     mapping(address => bool) private _verificados;
     mapping(address => bool) private _congeladas;
     mapping(address => bool) private _recuperadas;
@@ -145,6 +176,44 @@ contract Tepuy is ERC20, Pausable, AccessControlDefaultAdminRules {
         accionesAtestiguadas = nuevas;
         emit AtestiguacionCambiada(anterior, nuevas, msg.sender);
     }
+
+    /// @notice Publica el precio de cierre diario; solo ORACULO. Funciona aunque el mercado esté pausado.
+    /// @dev El hash es un compromiso público verificable contra el archivo oficial, no prueba de que el precio sea correcto. Valida solo la forma de la fecha, no el calendario.
+    /// @param centimos Precio en céntimos de Bs (> 0 y <= uint128 max).
+    /// @param fecha Fecha AAAAMMDD, mayor que la última y como máximo hoy + 2 días.
+    /// @param sha256Archivo SHA-256 del archivo oficial (no cero).
+    function publishPrice(uint256 centimos, uint32 fecha, bytes32 sha256Archivo) external onlyRole(ORACULO) {
+        if (centimos == 0) revert PrecioCero();
+        if (centimos > type(uint128).max) revert PrecioExcesivo(centimos);
+        if (sha256Archivo == bytes32(0)) revert HashVacio();
+        uint32 mes = (fecha / 100) % 100;
+        uint32 dia = fecha % 100;
+        if (fecha < 19700101 || fecha > 99991231 || mes < 1 || mes > 12 || dia < 1 || dia > 31) revert FechaInvalida(fecha);
+        // Sin tope a futuro una fecha lejana bloquearía al oráculo para siempre (sin función de reinicio).
+        uint32 maxima = _aaaammdd(block.timestamp + 2 days);
+        // slither-disable-next-line timestamp
+        if (fecha > maxima) revert FechaFutura(fecha, maxima);
+        uint32 ultima = ultimoPrecio.fecha;
+        if (fecha <= ultima) revert FechaNoCreciente(fecha, ultima); // solhint-disable-line gas-strict-inequalities
+        ultimoPrecio = Precio(centimos, sha256Archivo, fecha, uint64(block.timestamp));
+        emit PrecioPublicado(fecha, centimos, sha256Archivo, msg.sender);
+    }
+
+    // Fecha civil (UTC) AAAAMMDD de un timestamp; algoritmo civil-from-days de Howard Hinnant.
+    // slither-disable-start divide-before-multiply,timestamp
+    function _aaaammdd(uint256 ts) private pure returns (uint32) {
+        uint256 z = ts / 1 days + 719468;
+        uint256 era = z / 146097;
+        uint256 doe = z - era * 146097;
+        uint256 yoe = (doe - doe / 1460 + doe / 36524 - doe / 146096) / 365;
+        uint256 doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
+        uint256 mp = (5 * doy + 2) / 153;
+        uint256 dia = doy - (153 * mp + 2) / 5 + 1;
+        uint256 mes = mp < 10 ? mp + 3 : mp - 9;
+        uint256 anio = yoe + era * 400 + (mes < 3 ? 1 : 0);
+        return uint32(anio * 10000 + mes * 100 + dia);
+    }
+    // slither-disable-end divide-before-multiply,timestamp
 
     /// @notice Indica si la cuenta pasó KYC (nombre ERC-3643).
     /// @param cuenta Cuenta a consultar.

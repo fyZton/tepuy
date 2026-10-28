@@ -20,6 +20,17 @@
       <dt>Acciones en custodia (atestiguadas)</dt><dd id="attested">Cargando…</dd>
       <dt>Uso del tope</dt><dd><progress id="uso" max="100" value="0" aria-label="Uso del tope de emisión"></progress> <span id="usoPct">—</span></dd>
     </dl>
+    <h2>Precio de referencia (BVC)</h2>
+    <p id="precio-vacio">Cargando…</p>
+    <dl id="precio" aria-label="Precio de referencia" hidden>
+      <dt>Precio de cierre</dt><dd id="precio-bs">—</dd>
+      <dt>Fecha</dt><dd id="precio-fecha">—</dd>
+      <dt>Publicado</dt><dd id="precio-edad">—</dd>
+      <dt>SHA-256 del archivo</dt><dd><code id="precio-hash">—</code> <button type="button" id="copiar-hash">Copiar</button></dd>
+    </dl>
+    <p id="precio-aviso" role="status" hidden>Precio desactualizado: el cierre tiene más de 3 días o se publicó hace más de 24 horas.</p>
+    <p>Precio declarado por el oráculo (una sola cuenta). El hash permite auditar contra el archivo oficial, no prueba que el precio sea correcto. La BVC no publica este hash.</p>
+    <p>Para verificarlo, calcula el SHA-256 del archivo oficial de la BVC de esa fecha y compáralo con este hash.</p>
     <h2>Roles</h2>
     <table id="roles" aria-label="Roles">
       <thead><tr><th>Rol</th><th>Dirección</th></tr></thead>

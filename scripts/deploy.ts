@@ -1,4 +1,5 @@
-import { writeFileSync } from "node:fs";
+import { readFileSync, writeFileSync } from "node:fs";
+import { createHash } from "node:crypto";
 import { fileURLToPath } from "node:url";
 import { network } from "hardhat";
 import { ZeroAddress } from "ethers";
@@ -50,6 +51,19 @@ for (const cuenta of [desplegador, admin, ...Object.values(roles).map(([s]) => s
   }
 }
 
+// Precio de demo: línea "R|" de MVZ.A y fecha de "IG|DDMMAAAA|" del archivo oficial (bytes; latin-1), SHA-256 del archivo completo.
+const archivo = readFileSync(fileURLToPath(new URL("../oraculo/tests/fixtures/20261027.dat", import.meta.url)));
+const lineas = archivo.toString("latin1").split(/\r?\n/).map((l) => l.trim());
+const linea = lineas.find((l) => l.startsWith("R|") && l.split("|")[2] === "MVZ.A");
+const ig = lineas.find((l) => l.startsWith("IG|"))?.split("|")[1] ?? "";
+if (!/^[0-9]{8}$/.test(ig)) throw new Error("Falta la línea IG|DDMMAAAA| en el fixture");
+const fecha = Number(ig.slice(4) + ig.slice(2, 4) + ig.slice(0, 2));
+if (!linea) throw new Error("MVZ.A no está en el fixture");
+const [ent, dec = ""] = linea.split("|")[4].split("."); // decimales por texto, sin float
+if (!/^[0-9]+$/.test(ent) || !/^[0-9]{0,2}$/.test(dec)) throw new Error(`Cierre inválido: ${linea}`);
+const centimos = BigInt(ent + dec.padEnd(2, "0"));
+await (await tepuy.connect(oraculo).publishPrice(centimos, fecha,"0x" + createHash("sha256").update(archivo).digest("hex"))).wait();
+
 const address = await tepuy.getAddress();
 const abi = [
   "function name() view returns (string)",
@@ -61,6 +75,8 @@ const abi = [
   "function isFrozen(address) view returns (bool)",
   "function accionesAtestiguadas() view returns (uint256)",
   "function paused() view returns (bool)",
+  "function ultimoPrecio() view returns (uint256 centimos, bytes32 sha256Archivo, uint32 fecha, uint64 publicadoEn)",
+  "event PrecioPublicado(uint32 indexed fecha, uint256 centimos, bytes32 sha256Archivo, address indexed oraculo)",
   "event TransferenciaForzada(address indexed from, address indexed to, uint256 amount, string motivo, address indexed recuperador)",
   "event CuentaRecuperada(address indexed perdida, address indexed nueva, uint256 saldo, string motivo, address indexed recuperador)",
 ];

@@ -3,6 +3,7 @@ pragma solidity 0.8.28;
 
 import {Vm} from "forge-std/Vm.sol";
 import {Tepuy} from "../../contracts/Tepuy.sol";
+import {Fecha} from "./Fecha.sol";
 
 contract TepuyHandler {
     Vm private constant vm = Vm(address(uint160(uint256(keccak256("hevm cheat code")))));
@@ -12,6 +13,7 @@ contract TepuyHandler {
     address public immutable supervisor;
     address public immutable custodio;
     address public immutable recuperador;
+    address public immutable oraculo;
     address[4] public actores;
     address public constant SPENDER = address(0xB000); // nunca verificado: no necesita KYC
     uint256 public exitos;
@@ -20,19 +22,23 @@ contract TepuyHandler {
     uint256 public violacionesCongelada; // un movimiento normal cambió saldo de una congelada; debe quedar en 0
     uint256 public violacionesForzada; // forzada que cambió el suministro o dejó mal a la perdida; debe quedar en 0
     uint256 public violacionesReceptorCongelado; // forzada exitosa a un receptor congelado; debe quedar en 0
+    uint256 public violacionesPrecio; // fecha publicada no creciente o precio 0; debe quedar en 0
+    uint256 public publicaciones; // publicaciones exitosas
+    uint32 public fechaMax; // mayor fecha publicada con éxito
     uint256 public forzadas; // forzadas y recuperaciones exitosas
     bool public snapPausa; // hay foto tomada al pausar
     uint256 public supplyPausa;
     uint256 public saldosPausa;
     mapping(address => bool) public recibioSinKyc;
 
-    constructor(Tepuy t, address emisor_, address agente_, address supervisor_, address custodio_, address recuperador_) {
+    constructor(Tepuy t, address emisor_, address agente_, address supervisor_, address custodio_, address recuperador_, address oraculo_) {
         token = t;
         emisor = emisor_;
         agente = agente_;
         supervisor = supervisor_;
         custodio = custodio_;
         recuperador = recuperador_;
+        oraculo = oraculo_;
         for (uint160 i; i < 4; i++) actores[i] = address(0xA000 + i);
     }
 
@@ -176,5 +182,21 @@ contract TepuyHandler {
 
     function sumaSaldos() external view returns (uint256 t) {
         for (uint256 i; i < 4; i++) t += token.balanceOf(actores[i]);
+    }
+
+    // Fechas relativas al reloj: igual, anterior, mañana (avanza un día) y hoy + 3 (debe rechazarse); precio a veces 0.
+    function publishPrice(uint256 c, uint256 d, bytes32 h) external {
+        uint256 modo = d % 4;
+        if (modo == 2) vm.warp(block.timestamp + 1 days);
+        uint32 f = Fecha.de(block.timestamp + (modo == 3 ? 3 days : 1 days));
+        if (modo == 0 && fechaMax != 0) f = fechaMax;
+        if (modo == 1 && fechaMax != 0) f = fechaMax - 1;
+        vm.prank(oraculo);
+        try token.publishPrice(c % 5, f, h) {
+            (uint256 cp,, uint32 fp,) = token.ultimoPrecio();
+            if (f <= fechaMax || cp == 0 || fp != f || f > Fecha.de(block.timestamp + 2 days)) violacionesPrecio++;
+            fechaMax = fp;
+            publicaciones++;
+        } catch {}
     }
 }

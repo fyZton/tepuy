@@ -2,6 +2,21 @@ import { JsonRpcProvider, Contract } from "./vendor/ethers.min.js";
 
 const $ = (id) => document.getElementById(id);
 
+// Se registra antes de cualquier await: el botón funciona aunque la carga falle o tarde.
+$("copiar-hash").addEventListener("click", async () => {
+  try {
+    await navigator.clipboard.writeText($("precio-hash").textContent);
+    $("copiar-hash").textContent = "Copiado";
+  } catch {
+    $("copiar-hash").textContent = "No se pudo copiar";
+  }
+  setTimeout(() => { $("copiar-hash").textContent = "Copiar"; }, 2000);
+});
+
+// Céntimos (BigInt) a "Bs. 16.999,99" sin pasar por float.
+const formatoBs = (c) => `Bs. ${new Intl.NumberFormat("es-VE").format(c / 100n)},${(c % 100n).toString().padStart(2, "0")}`;
+const hace = (seg) => (seg < 60 ? "hace menos de 1 min" : seg < 3600 ? `hace ${Math.floor(seg / 60)} min` : `hace ${Math.floor(seg / 3600)} h`);
+
 try {
   const respuesta = await fetch("deployment.json");
   if (!respuesta.ok) throw new Error(`deployment.json: ${respuesta.status}`);
@@ -21,6 +36,32 @@ try {
   const pct = attested === 0n ? 0 : Number((supply * 10000n) / attested) / 100;
   $("uso").value = pct;
   $("usoPct").textContent = `${pct}%`;
+  try {
+    const [centimos, hash, fecha, publicadoEn] = await token.ultimoPrecio();
+    if (fecha === 0n) {
+      $("precio-vacio").textContent = "Aún no hay precio publicado";
+    } else {
+      const f = fecha.toString();
+      $("precio-bs").textContent = formatoBs(centimos);
+      $("precio-fecha").textContent = `Cierre del ${f.slice(6)}/${f.slice(4, 6)}/${f.slice(0, 4)}`;
+      $("precio-hash").textContent = hash;
+      // Reloj: el mayor entre el último bloque y el navegador (el nodo local puede adelantar su tiempo).
+      const ahora = Math.max((await provider.getBlock("latest")).timestamp, Math.floor(Date.now() / 1000));
+      const seg = Math.max(0, ahora - Number(publicadoEn));
+      $("precio-edad").textContent = hace(seg);
+      // Días de calendario (UTC) entre la fecha de cierre y hoy.
+      const hoy = new Date();
+      const dias = Math.round((Date.UTC(hoy.getUTCFullYear(), hoy.getUTCMonth(), hoy.getUTCDate()) - Date.UTC(+f.slice(0, 4), +f.slice(4, 6) - 1, +f.slice(6))) / 86400000);
+      $("precio-aviso").hidden = seg <= 86400 && dias <= 3;
+      $("precio-vacio").hidden = true;
+      $("precio").hidden = false;
+    }
+  } catch (e) {
+    console.error(e);
+    $("precio").hidden = true;
+    $("precio-vacio").hidden = false;
+    $("precio-vacio").textContent = "No se pudo leer el precio.";
+  }
   for (const [rol, dir] of Object.entries(roles)) {
     const fila = $("roles").tBodies[0].insertRow();
     fila.insertCell().textContent = rol;
@@ -56,7 +97,9 @@ try {
 } catch (e) {
   console.error(e);
   $("uso").value = 0;
-  for (const id of ["name", "symbol", "decimals", "supply", "attested", "usoPct", "mercado", "forzados-vacio"]) $(id).textContent = "—";
+  for (const id of ["name", "symbol", "decimals", "supply", "attested", "usoPct", "mercado", "forzados-vacio", "precio-vacio"]) $(id).textContent = "—";
   $("error").textContent = "No se pudo leer el contrato. Verifica que el nodo local (http://127.0.0.1:8545) esté encendido y que hayas ejecutado el despliegue.";
   $("error").hidden = false;
+  $("precio").hidden = true;
+  $("precio-vacio").hidden = false;
 }
