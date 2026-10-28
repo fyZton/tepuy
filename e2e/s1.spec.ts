@@ -23,6 +23,8 @@ test("muestra 2 inversionistas verificados con saldo 1000 y 0", async ({ page })
   await expect(filas).toHaveCount(2);
   await expect(filas.nth(0).locator("td").nth(1)).toHaveText("1000");
   await expect(filas.nth(1).locator("td").nth(1)).toHaveText("0");
+  await expect(filas.nth(0).locator("td").nth(2)).toHaveText("Activo");
+  await expect(filas.nth(1).locator("td").nth(2)).toHaveText("Activo");
   const dirs = await page.locator("#verificados tbody td:first-child").allTextContents();
   expect(dirs.every((d) => /^0x[0-9a-fA-F]{40}$/.test(d))).toBe(true);
   expect(new Set(dirs).size).toBe(2);

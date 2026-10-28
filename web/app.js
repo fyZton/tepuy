@@ -23,10 +23,12 @@ try {
   }
   // Se lee isVerified en cadena: el JSON solo sugiere candidatos.
   for (const dir of verificados) {
-    const [ok, saldo] = await Promise.all([token.isVerified(dir), token.balanceOf(dir)]);
+    const [ok, congelada, saldo] = await Promise.all([token.isVerified(dir), token.isFrozen(dir), token.balanceOf(dir)]);
     const fila = $("verificados").tBodies[0].insertRow();
     fila.insertCell().textContent = dir;
-    fila.insertCell().textContent = ok ? saldo.toString() : "no verificado";
+    fila.insertCell().textContent = saldo.toString();
+    // KYC primero, igual que en _update.
+    fila.insertCell().textContent = !ok ? "No verificado" : congelada ? "Congelado" : "Activo";
   }
 } catch (e) {
   console.error(e);

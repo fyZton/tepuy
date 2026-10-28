@@ -13,14 +13,17 @@ contract TepuyInvariantes is Test {
         address admin = makeAddr("admin");
         address emisor = makeAddr("emisor");
         address agente = makeAddr("agente");
+        address supervisor = makeAddr("supervisor");
         token = new Tepuy(1 days, admin);
         bytes32 r1 = token.EMISOR();
         bytes32 r2 = token.AGENTE_KYC();
+        bytes32 r3 = token.SUPERVISOR();
         vm.startPrank(admin);
         token.grantRole(r1, emisor);
         token.grantRole(r2, agente);
+        token.grantRole(r3, supervisor);
         vm.stopPrank();
-        handler = new TepuyHandler(token, emisor, agente);
+        handler = new TepuyHandler(token, emisor, agente, supervisor);
         // Arranque con dos verificados para que haya operaciones exitosas.
         vm.startPrank(agente);
         token.setVerified(handler.actores(0), true);
@@ -29,7 +32,7 @@ contract TepuyInvariantes is Test {
         targetContract(address(handler));
     }
 
-    /// Ninguna llamada exitosa tuvo emisor o receptor sin KYC al momento de ejecutarse.
+    /// Ninguna llamada exitosa tuvo emisor o receptor sin KYC o congelado al momento de ejecutarse.
     function invariant_noUnverifiedReceives() public view {
         assertEq(handler.violaciones(), 0);
     }
@@ -52,5 +55,19 @@ contract TepuyInvariantes is Test {
         assertEq(handler.violaciones(), 0);
         assertEq(handler.sumaSaldos(), token.totalSupply());
         assertEq(token.balanceOf(handler.actores(1)), 7);
+    }
+
+    /// No vacuidad del congelamiento: congelada no opera y descongelar restaura.
+    function test_handlerFreezeBlocks() public {
+        handler.mint(0, 10);
+        handler.setAddressFrozen(0, true);
+        handler.transfer(0, 1, 4);
+        handler.transfer(1, 0, 4);
+        handler.mint(0, 5);
+        assertEq(handler.exitos(), 1);
+        handler.setAddressFrozen(0, false);
+        handler.transfer(0, 1, 4);
+        assertEq(handler.exitos(), 2);
+        assertEq(handler.violaciones(), 0);
     }
 }

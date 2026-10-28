@@ -33,6 +33,8 @@ contract Tepuy is ERC20, AccessControlDefaultAdminRules {
     error NoVerificado(address cuenta);
     /// @notice La dirección cero no puede verificarse.
     error CuentaInvalida();
+    /// @notice La cuenta está congelada por el supervisor.
+    error CuentaCongelada(address cuenta);
 
     // Indexar un bool no sirve: se desactiva gas-indexed-events en el evento.
     /// @notice Cambió el estado KYC de una cuenta.
@@ -41,7 +43,14 @@ contract Tepuy is ERC20, AccessControlDefaultAdminRules {
     /// @param agente Quien lo cambió.
     event VerificacionCambiada(address indexed cuenta, bool verificado, address indexed agente); // solhint-disable-line gas-indexed-events
 
+    /// @notice Cambió el congelamiento de una cuenta.
+    /// @param cuenta Cuenta afectada.
+    /// @param congelada Nuevo estado.
+    /// @param supervisor Quien lo cambió.
+    event CongelamientoCambiado(address indexed cuenta, bool congelada, address indexed supervisor); // solhint-disable-line gas-indexed-events
+
     mapping(address => bool) private _verificados;
+    mapping(address => bool) private _congeladas;
 
     constructor(uint48 initialDelay, address initialAdmin)
         ERC20("Tepuy Demo", "TPUY")
@@ -89,12 +98,32 @@ contract Tepuy is ERC20, AccessControlDefaultAdminRules {
         emit VerificacionCambiada(cuenta, verificado, msg.sender);
     }
 
-    // Único punto de reglas. Quemar no exige KYC del receptor (to == 0) pero sí del emisor.
+    /// @notice Indica si la cuenta está congelada (nombre ERC-3643).
+    /// @param cuenta Cuenta a consultar.
+    /// @return Si está congelada.
+    function isFrozen(address cuenta) public view returns (bool) {
+        return _congeladas[cuenta];
+    }
+
+    /// @notice Congela o descongela una cuenta; solo SUPERVISOR. Independiente del KYC.
+    /// @param cuenta Cuenta a cambiar.
+    /// @param congelada Nuevo estado.
+    function setAddressFrozen(address cuenta, bool congelada) external onlyRole(SUPERVISOR) {
+        if (cuenta == address(0)) revert CuentaInvalida();
+        if (_congeladas[cuenta] == congelada) return; // sin cambio: sin escritura ni evento
+        _congeladas[cuenta] = congelada;
+        emit CongelamientoCambiado(cuenta, congelada, msg.sender);
+    }
+
+    // Único punto de reglas. Orden: KYC (from, to) y luego congelamiento (from, to).
+    // Quemar (to == 0) no exige KYC ni congelamiento del receptor, pero sí del emisor.
     // Quitar KYC a quien tiene saldo lo bloquea hasta que el RECUPERADOR lo mueva (S7).
     // El spender de transferFrom no necesita KYC: solo importan from y to.
     function _update(address from, address to, uint256 value) internal override {
         if (from != address(0) && !_verificados[from]) revert NoVerificado(from);
         if (to != address(0) && !_verificados[to]) revert NoVerificado(to);
+        if (from != address(0) && _congeladas[from]) revert CuentaCongelada(from);
+        if (to != address(0) && _congeladas[to]) revert CuentaCongelada(to);
         super._update(from, to, value);
     }
 }

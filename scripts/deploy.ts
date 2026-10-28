@@ -56,6 +56,7 @@ const abi = [
   "function totalSupply() view returns (uint256)",
   "function balanceOf(address) view returns (uint256)",
   "function isVerified(address) view returns (bool)",
+  "function isFrozen(address) view returns (bool)",
 ];
 writeFileSync(fileURLToPath(new URL("../web/deployment.json", import.meta.url)), JSON.stringify({
   chainId: Number(chainId),

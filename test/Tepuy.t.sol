@@ -13,6 +13,7 @@ contract TepuyTest is Test {
     address emisor = makeAddr("emisor");
     address user = makeAddr("user");
     address kyc = makeAddr("kyc");
+    address sup = makeAddr("sup");
     address otro = makeAddr("otro");
 
     function setUp() public {
@@ -23,8 +24,21 @@ contract TepuyTest is Test {
         bytes32 kycRole = token.AGENTE_KYC();
         vm.prank(admin);
         token.grantRole(kycRole, kyc);
+        bytes32 supRole = token.SUPERVISOR();
+        vm.prank(admin);
+        token.grantRole(supRole, sup);
         vm.prank(kyc);
         token.setVerified(user, true);
+    }
+
+    function _freeze(address who, bool c) internal {
+        vm.prank(sup);
+        token.setAddressFrozen(who, c);
+    }
+
+    function _verify(address who) internal {
+        vm.prank(kyc);
+        token.setVerified(who, true);
     }
 
     function _unauth(address who, bytes32 role) internal {
@@ -138,6 +152,159 @@ contract TepuyTest is Test {
         vm.expectRevert(abi.encodeWithSelector(Tepuy.NoVerificado.selector, to));
         vm.prank(user);
         token.transfer(to, amount);
+    }
+
+    function test_frozenCannotSendNorReceiveNorMint() public {
+        _verify(otro);
+        _mintTo(user, 10);
+        _freeze(user, true);
+        assertTrue(token.isVerified(user)); // KYC intacto
+        vm.expectRevert(abi.encodeWithSelector(Tepuy.CuentaCongelada.selector, user));
+        vm.prank(user);
+        token.transfer(otro, 1);
+        _mintTo(otro, 5);
+        vm.expectRevert(abi.encodeWithSelector(Tepuy.CuentaCongelada.selector, user));
+        vm.prank(otro);
+        token.transfer(user, 1);
+        vm.expectRevert(abi.encodeWithSelector(Tepuy.CuentaCongelada.selector, user));
+        _mintTo(user, 1);
+        assertEq(token.balanceOf(user), 10);
+    }
+
+    function test_frozenRespectedByTransferFrom() public {
+        address spender = makeAddr("spender");
+        _verify(otro);
+        _mintTo(user, 10);
+        vm.prank(user);
+        token.approve(spender, 10);
+        _freeze(user, true);
+        vm.expectRevert(abi.encodeWithSelector(Tepuy.CuentaCongelada.selector, user));
+        vm.prank(spender);
+        token.transferFrom(user, otro, 1);
+        _freeze(user, false);
+        _freeze(otro, true);
+        vm.expectRevert(abi.encodeWithSelector(Tepuy.CuentaCongelada.selector, otro));
+        vm.prank(spender);
+        token.transferFrom(user, otro, 1);
+    }
+
+    function test_unfreezeRestores() public {
+        _verify(otro);
+        _mintTo(user, 10);
+        _freeze(user, true);
+        _freeze(user, false);
+        vm.prank(user);
+        token.transfer(otro, 3);
+        assertEq(token.balanceOf(otro), 3);
+        assertFalse(token.isFrozen(user));
+    }
+
+    // Orden documentado: KYC antes que congelamiento.
+    function test_kycCheckedBeforeFreeze() public {
+        _mintTo(user, 10);
+        _freeze(otro, true); // congelado y sin KYC
+        vm.expectRevert(abi.encodeWithSelector(Tepuy.NoVerificado.selector, otro));
+        vm.prank(user);
+        token.transfer(otro, 1);
+        _freeze(user, true);
+        vm.prank(kyc);
+        token.setVerified(user, false); // congelado y sin KYC
+        vm.expectRevert(abi.encodeWithSelector(Tepuy.NoVerificado.selector, user));
+        vm.prank(user);
+        token.transfer(otro, 1);
+    }
+
+    function test_setAddressFrozenOnlySupervisor() public {
+        bytes32 role = token.SUPERVISOR();
+        _unauth(user, role);
+        vm.prank(user);
+        token.setAddressFrozen(otro, true);
+        _unauth(admin, role);
+        vm.prank(admin);
+        token.setAddressFrozen(otro, true);
+        _unauth(kyc, role);
+        vm.prank(kyc);
+        token.setAddressFrozen(otro, true);
+        _unauth(emisor, role);
+        vm.prank(emisor);
+        token.setAddressFrozen(otro, true);
+    }
+
+    function test_setAddressFrozenZeroReverts() public {
+        vm.expectRevert(Tepuy.CuentaInvalida.selector);
+        vm.prank(sup);
+        token.setAddressFrozen(address(0), true);
+    }
+
+    function test_setAddressFrozenEmitsEvent() public {
+        vm.expectEmit(true, true, false, true, address(token));
+        emit Tepuy.CongelamientoCambiado(otro, true, sup);
+        _freeze(otro, true);
+        assertTrue(token.isFrozen(otro));
+    }
+
+    function test_setAddressFrozenNoChangeEmitsNothing() public {
+        vm.recordLogs();
+        _freeze(user, false);
+        _freeze(otro, false);
+        assertEq(vm.getRecordedLogs().length, 0);
+        _freeze(user, true);
+        vm.recordLogs();
+        _freeze(user, true);
+        assertEq(vm.getRecordedLogs().length, 0);
+        assertTrue(token.isFrozen(user));
+    }
+
+    function testFuzz_frozenNeverMovesNorReceives(address who, uint256 amount) public {
+        vm.assume(who != address(0) && who != user);
+        amount = bound(amount, 1, 1e30);
+        _verify(who);
+        _mintTo(user, amount);
+        _freeze(who, true);
+        vm.expectRevert(abi.encodeWithSelector(Tepuy.CuentaCongelada.selector, who));
+        vm.prank(user);
+        token.transfer(who, amount);
+        vm.expectRevert(abi.encodeWithSelector(Tepuy.CuentaCongelada.selector, who));
+        _mintTo(who, amount);
+        vm.expectRevert(abi.encodeWithSelector(Tepuy.CuentaCongelada.selector, who));
+        vm.prank(who);
+        token.transfer(user, 0);
+    }
+
+    // Congelar es sobre el titular: un spender congelado sí mueve fondos entre cuentas activas (ERC-3643).
+    function test_frozenSpenderCanStillMoveBetweenActive() public {
+        address spender = makeAddr("spender");
+        _verify(otro);
+        _mintTo(user, 10);
+        vm.prank(user);
+        token.approve(spender, 10);
+        _freeze(spender, true);
+        vm.prank(spender);
+        token.transferFrom(user, otro, 4);
+        assertEq(token.balanceOf(otro), 4);
+    }
+
+    function testFuzz_transferFromFrozenReverts(address who, uint256 amount, bool owner) public {
+        vm.assume(who != address(0) && who != user);
+        amount = bound(amount, 1, 1e30);
+        address spender = makeAddr("spender");
+        _verify(who);
+        _mintTo(user, amount);
+        _mintTo(who, amount);
+        vm.prank(user);
+        token.approve(spender, amount);
+        vm.prank(who);
+        token.approve(spender, amount);
+        address frozen = owner ? user : who;
+        _freeze(frozen, true);
+        vm.expectRevert(abi.encodeWithSelector(Tepuy.CuentaCongelada.selector, frozen));
+        vm.prank(spender);
+        token.transferFrom(user, who, amount);
+        // Descongelar restaura.
+        _freeze(frozen, false);
+        vm.prank(spender);
+        token.transferFrom(user, who, amount);
+        assertEq(token.balanceOf(who), 2 * amount);
     }
 
     function test_metadata() public view {
