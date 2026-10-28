@@ -35,10 +35,28 @@ try {
     // KYC primero, igual que en _update.
     fila.insertCell().textContent = !ok ? "No verificado" : congelada ? "Congelado" : "Activo";
   }
+  const [forzadas, recuperadas] = await Promise.all([
+    token.queryFilter(token.filters.TransferenciaForzada()),
+    token.queryFilter(token.filters.CuentaRecuperada()),
+  ]);
+  const eventos = [...forzadas, ...recuperadas].sort((a, b) => a.blockNumber - b.blockNumber || a.index - b.index);
+  $("forzados-vacio").textContent = "Sin movimientos forzados";
+  if (eventos.length) {
+    $("forzados-vacio").hidden = true;
+    $("forzados").hidden = false;
+    for (const ev of eventos) {
+      const rec = ev.eventName === "CuentaRecuperada";
+      const fila = $("forzados").tBodies[0].insertRow();
+      const celdas = rec
+        ? ["Recuperación", ev.args.perdida, ev.args.nueva, ev.args.saldo, ev.args.motivo]
+        : ["Forzada", ev.args.from, ev.args.to, ev.args.amount, ev.args.motivo];
+      for (const t of celdas) fila.insertCell().textContent = t.toString();
+    }
+  }
 } catch (e) {
   console.error(e);
   $("uso").value = 0;
-  for (const id of ["name", "symbol", "decimals", "supply", "attested", "usoPct", "mercado"]) $(id).textContent = "—";
+  for (const id of ["name", "symbol", "decimals", "supply", "attested", "usoPct", "mercado", "forzados-vacio"]) $(id).textContent = "—";
   $("error").textContent = "No se pudo leer el contrato. Verifica que el nodo local (http://127.0.0.1:8545) esté encendido y que hayas ejecutado el despliegue.";
   $("error").hidden = false;
 }

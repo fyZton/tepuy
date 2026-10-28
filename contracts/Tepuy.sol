@@ -24,6 +24,9 @@ contract Tepuy is ERC20, Pausable, AccessControlDefaultAdminRules {
     /// @notice Recupera claves perdidas (S7).
     bytes32 public constant RECUPERADOR = keccak256("RECUPERADOR");
 
+    /// @notice Largo máximo en bytes del motivo de un movimiento forzado.
+    uint256 public constant MAX_MOTIVO = 256;
+
     /// @notice Retraso mínimo del traspaso de admin.
     uint48 public constant RETRASO_MINIMO = 1 hours;
 
@@ -50,6 +53,35 @@ contract Tepuy is ERC20, Pausable, AccessControlDefaultAdminRules {
     /// @param supervisor Quien lo cambió.
     event CongelamientoCambiado(address indexed cuenta, bool congelada, address indexed supervisor); // solhint-disable-line gas-indexed-events
 
+    /// @notice El motivo de un movimiento forzado está vacío.
+    error MotivoVacio();
+    /// @notice El movimiento forzado es de una cuenta a sí misma.
+    error CuentasIguales(address cuenta);
+    /// @notice El motivo supera MAX_MOTIVO bytes.
+    error MotivoLargo(uint256 largo);
+    /// @notice La cuenta fue recuperada: no puede verificarse ni descongelarse nunca más.
+    error CuentaYaRecuperada(address cuenta);
+    /// @notice El monto de un movimiento forzado es cero.
+    error MontoCero();
+    /// @notice La cuenta a recuperar no tiene saldo.
+    error SinSaldo(address cuenta);
+
+    /// @notice El RECUPERADOR movió acciones por orden judicial o regulatoria.
+    /// @param from Cuenta de origen.
+    /// @param to Cuenta de destino.
+    /// @param amount Acciones movidas.
+    /// @param motivo Referencia de la orden.
+    /// @param recuperador Quien lo ejecutó.
+    event TransferenciaForzada(address indexed from, address indexed to, uint256 amount, string motivo, address indexed recuperador); // solhint-disable-line gas-indexed-events
+
+    /// @notice El RECUPERADOR migró el saldo de una clave perdida.
+    /// @param perdida Cuenta abandonada.
+    /// @param nueva Cuenta que recibe.
+    /// @param saldo Acciones migradas.
+    /// @param motivo Referencia de la solicitud.
+    /// @param recuperador Quien lo ejecutó.
+    event CuentaRecuperada(address indexed perdida, address indexed nueva, uint256 saldo, string motivo, address indexed recuperador); // solhint-disable-line gas-indexed-events
+
     /// @notice Se intentó emitir más que el tope atestiguado.
     error TopeExcedido(uint256 solicitado, uint256 disponible);
     /// @notice La atestiguación nueva es menor que el suministro.
@@ -67,6 +99,7 @@ contract Tepuy is ERC20, Pausable, AccessControlDefaultAdminRules {
 
     mapping(address => bool) private _verificados;
     mapping(address => bool) private _congeladas;
+    mapping(address => bool) private _recuperadas;
 
     constructor(uint48 initialDelay, address initialAdmin)
         ERC20("Tepuy Demo", "TPUY")
@@ -120,11 +153,19 @@ contract Tepuy is ERC20, Pausable, AccessControlDefaultAdminRules {
         return _verificados[cuenta];
     }
 
+    /// @notice Indica si la cuenta fue recuperada (irreversible).
+    /// @param cuenta Cuenta a consultar.
+    /// @return Si fue recuperada.
+    function isRecovered(address cuenta) public view returns (bool) {
+        return _recuperadas[cuenta];
+    }
+
     /// @notice Marca o desmarca a una cuenta como verificada; solo AGENTE_KYC. Sin datos personales on-chain.
     /// @param cuenta Cuenta a cambiar.
     /// @param verificado Nuevo estado.
     function setVerified(address cuenta, bool verificado) external onlyRole(AGENTE_KYC) {
         if (cuenta == address(0)) revert CuentaInvalida();
+        if (verificado && _recuperadas[cuenta]) revert CuentaYaRecuperada(cuenta);
         if (_verificados[cuenta] == verificado) return; // sin cambio: sin escritura ni evento
         _verificados[cuenta] = verificado;
         emit VerificacionCambiada(cuenta, verificado, msg.sender);
@@ -142,6 +183,7 @@ contract Tepuy is ERC20, Pausable, AccessControlDefaultAdminRules {
     /// @param congelada Nuevo estado.
     function setAddressFrozen(address cuenta, bool congelada) external onlyRole(SUPERVISOR) {
         if (cuenta == address(0)) revert CuentaInvalida();
+        if (!congelada && _recuperadas[cuenta]) revert CuentaYaRecuperada(cuenta);
         if (_congeladas[cuenta] == congelada) return; // sin cambio: sin escritura ni evento
         _congeladas[cuenta] = congelada;
         emit CongelamientoCambiado(cuenta, congelada, msg.sender);
@@ -157,8 +199,64 @@ contract Tepuy is ERC20, Pausable, AccessControlDefaultAdminRules {
         _unpause();
     }
 
+    /// @notice Mueve acciones por orden judicial; solo RECUPERADOR. Salta pausa y congelamiento del origen; el receptor debe estar verificado y no congelado.
+    /// @param from Origen (puede estar sin KYC, congelado o en pausa).
+    /// @param to Destino verificado y no congelado.
+    /// @param amount Acciones a mover (> 0).
+    /// @param motivo Referencia de la orden (no vacío).
+    /// @return Siempre true.
+    function forcedTransfer(address from, address to, uint256 amount, string calldata motivo)
+        external
+        onlyRole(RECUPERADOR)
+        returns (bool)
+    {
+        _forzar(from, to, amount, motivo);
+        emit TransferenciaForzada(from, to, amount, motivo, msg.sender);
+        return true;
+    }
+
+    /// @notice Migra todo el saldo de una clave perdida a una cuenta ya verificada; solo RECUPERADOR.
+    /// @dev Congela y desverifica la cuenta perdida, sin vuelta atrás: si la clave reaparece no puede recibir ni mover nada (sí se le puede rescatar saldo con forcedTransfer).
+    /// @param perdida Cuenta abandonada.
+    /// @param nueva Cuenta verificada por AGENTE_KYC y no congelada.
+    /// @param motivo Referencia de la solicitud (no vacío).
+    /// @return Siempre true.
+    function recoveryAddress(address perdida, address nueva, string calldata motivo)
+        external
+        onlyRole(RECUPERADOR)
+        returns (bool)
+    {
+        uint256 saldo = balanceOf(perdida);
+        if (saldo == 0) revert SinSaldo(perdida);
+        _forzar(perdida, nueva, saldo, motivo);
+        // Irreversible: los permisos (approve) de la clave perdida quedan inertes porque nunca puede reactivarse.
+        _recuperadas[perdida] = true;
+        if (!_congeladas[perdida]) {
+            _congeladas[perdida] = true;
+            emit CongelamientoCambiado(perdida, true, msg.sender);
+        }
+        if (_verificados[perdida]) {
+            _verificados[perdida] = false;
+            emit VerificacionCambiada(perdida, false, msg.sender);
+        }
+        emit CuentaRecuperada(perdida, nueva, saldo, motivo, msg.sender);
+        return true;
+    }
+
+    // Vía interna: salta solo pausa y congelamiento del origen. address(0) como origen sería una emisión sin tope.
+    function _forzar(address from, address to, uint256 amount, string calldata motivo) private {
+        if (bytes(motivo).length == 0) revert MotivoVacio();
+        if (bytes(motivo).length > MAX_MOTIVO) revert MotivoLargo(bytes(motivo).length);
+        if (from == address(0) || to == address(0)) revert CuentaInvalida();
+        if (from == to) revert CuentasIguales(from);
+        if (amount == 0) revert MontoCero();
+        _exigirKyc(to);
+        if (_congeladas[to]) revert CuentaCongelada(to);
+        _mover(from, to, amount);
+    }
+
     // Único punto de reglas. Orden: pausa (la más general), KYC (from, to) y luego congelamiento (from, to).
-    // S7 usará un camino interno que salta solo pausa y congelamiento, manteniendo el KYC del receptor.
+    // S7 (_forzar) salta solo pausa y congelamiento, manteniendo el KYC y congelamiento del receptor.
     // Quemar (to == 0) no exige KYC ni congelamiento del receptor, pero sí del emisor.
     // Quitar KYC a quien tiene saldo lo bloquea hasta que el RECUPERADOR lo mueva (S7).
     // El spender de transferFrom no necesita KYC: solo importan from y to.
@@ -175,7 +273,7 @@ contract Tepuy is ERC20, Pausable, AccessControlDefaultAdminRules {
         if (!_verificados[cuenta]) revert NoVerificado(cuenta);
     }
 
-    // Punto de movimiento sin reglas: solo lo llama _update (S7 tendrá su propia vía con KYC del receptor).
+    // Punto de movimiento sin reglas: solo lo llaman _update y _forzar (que valida el receptor).
     function _mover(address from, address to, uint256 value) private {
         super._update(from, to, value);
     }

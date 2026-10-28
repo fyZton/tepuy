@@ -17,6 +17,7 @@ contract TepuyTest is Test {
     address sup = makeAddr("sup");
     address otro = makeAddr("otro");
     address cust = makeAddr("cust");
+    address rec = makeAddr("rec");
     uint256 constant TOPE = type(uint128).max;
 
     function setUp() public {
@@ -35,6 +36,9 @@ contract TepuyTest is Test {
         bytes32 custRole = token.CUSTODIO();
         vm.prank(admin);
         token.grantRole(custRole, cust);
+        bytes32 recRole = token.RECUPERADOR();
+        vm.prank(admin);
+        token.grantRole(recRole, rec);
         _attest(TOPE); // holgura para los demás tests; los del tope fijan su propio valor
     }
 
@@ -739,5 +743,220 @@ contract TepuyTest is Test {
         vm.expectRevert(Pausable.EnforcedPause.selector);
         _mintTo(to, amount % 100);
         assertEq(token.totalSupply(), 10);
+    }
+
+    // ---- S7: transferencia forzada y recuperación ----
+
+    string constant M = "orden 123";
+
+    function _forzar(address from, address to, uint256 n) internal {
+        vm.prank(rec);
+        token.forcedTransfer(from, to, n, M);
+    }
+
+    function _recuperar(address perdida, address nueva) internal {
+        vm.prank(rec);
+        token.recoveryAddress(perdida, nueva, M);
+    }
+
+    function test_forcedAndRecoveryOnlyRecuperador() public {
+        bytes32 role = token.RECUPERADOR();
+        _verify(otro);
+        _mintTo(user, 10);
+        address[6] memory otros = [admin, sup, kyc, cust, emisor, otro];
+        for (uint256 i; i < 6; i++) {
+            _unauth(otros[i], role);
+            vm.prank(otros[i]);
+            token.forcedTransfer(user, otro, 1, M);
+            _unauth(otros[i], role);
+            vm.prank(otros[i]);
+            token.recoveryAddress(user, otro, M);
+        }
+        assertEq(token.balanceOf(user), 10);
+    }
+
+    function test_forcedFromFrozenUnverifiedAndPaused() public {
+        _verify(otro);
+        _mintTo(user, 10);
+        _freeze(user, true);
+        _pause();
+        vm.prank(kyc);
+        token.setVerified(user, false);
+        vm.expectEmit(true, true, true, true);
+        emit Tepuy.TransferenciaForzada(user, otro, 4, M, rec);
+        _forzar(user, otro, 4);
+        assertEq(token.balanceOf(user), 6);
+        assertEq(token.balanceOf(otro), 4);
+        assertEq(token.totalSupply(), 10);
+    }
+
+    function test_forcedReceiverRules() public {
+        _mintTo(user, 10);
+        vm.expectRevert(abi.encodeWithSelector(Tepuy.NoVerificado.selector, otro));
+        _forzar(user, otro, 1);
+        _verify(otro);
+        _freeze(otro, true);
+        vm.expectRevert(abi.encodeWithSelector(Tepuy.CuentaCongelada.selector, otro));
+        _forzar(user, otro, 1);
+        vm.expectRevert(Tepuy.CuentaInvalida.selector);
+        _forzar(user, address(0), 1);
+        assertEq(token.balanceOf(user), 10);
+    }
+
+    function test_forcedInvalidArgs() public {
+        _verify(otro);
+        _mintTo(user, 10);
+        vm.expectRevert(abi.encodeWithSelector(Tepuy.CuentasIguales.selector, user));
+        _forzar(user, user, 1);
+        vm.expectRevert(Tepuy.MontoCero.selector);
+        _forzar(user, otro, 0);
+        vm.expectRevert(Tepuy.MotivoVacio.selector);
+        vm.prank(rec);
+        token.forcedTransfer(user, otro, 1, "");
+        vm.expectRevert(abi.encodeWithSelector(IERC20Errors.ERC20InsufficientBalance.selector, user, 10, 11));
+        _forzar(user, otro, 11);
+    }
+
+    /// Origen address(0) sería una emisión sin tope: debe rechazarse.
+    function test_forcedCannotMint() public {
+        vm.expectRevert(Tepuy.CuentaInvalida.selector);
+        _forzar(address(0), user, 1);
+        assertEq(token.totalSupply(), 0);
+    }
+
+    function test_recoveryMovesAllFreezesAndUnverifies() public {
+        _verify(otro);
+        _mintTo(user, 10);
+        _pause();
+        vm.expectEmit(true, true, true, true);
+        emit Tepuy.CuentaRecuperada(user, otro, 10, M, rec);
+        _recuperar(user, otro);
+        assertEq(token.balanceOf(user), 0);
+        assertEq(token.balanceOf(otro), 10);
+        assertTrue(token.isFrozen(user));
+        assertFalse(token.isVerified(user));
+        assertEq(token.totalSupply(), 10);
+        assertEq(token.accionesAtestiguadas(), TOPE);
+    }
+
+    function test_recoveryFromAlreadyFrozenUnverified() public {
+        _verify(otro);
+        _mintTo(user, 10);
+        _freeze(user, true);
+        vm.prank(kyc);
+        token.setVerified(user, false);
+        _recuperar(user, otro);
+        assertEq(token.balanceOf(otro), 10);
+        assertTrue(token.isFrozen(user));
+    }
+
+    function test_recoveryReverts() public {
+        _verify(otro);
+        vm.expectRevert(abi.encodeWithSelector(Tepuy.SinSaldo.selector, user));
+        _recuperar(user, otro);
+        vm.expectRevert(abi.encodeWithSelector(Tepuy.SinSaldo.selector, address(0)));
+        _recuperar(address(0), otro);
+        _mintTo(user, 10);
+        address nueva = makeAddr("nueva");
+        vm.expectRevert(abi.encodeWithSelector(Tepuy.NoVerificado.selector, nueva));
+        _recuperar(user, nueva);
+        _freeze(otro, true);
+        vm.expectRevert(abi.encodeWithSelector(Tepuy.CuentaCongelada.selector, otro));
+        _recuperar(user, otro);
+        vm.expectRevert(Tepuy.CuentaInvalida.selector);
+        _recuperar(user, address(0));
+        vm.expectRevert(abi.encodeWithSelector(Tepuy.CuentasIguales.selector, user));
+        _recuperar(user, user);
+        vm.expectRevert(Tepuy.MotivoVacio.selector);
+        vm.prank(rec);
+        token.recoveryAddress(user, otro, "");
+        assertEq(token.balanceOf(user), 10);
+        assertFalse(token.isFrozen(user));
+    }
+
+    function test_normalTransfersStillBlockedAfterS7() public {
+        _verify(otro);
+        _mintTo(user, 10);
+        _freeze(user, true);
+        vm.expectRevert(abi.encodeWithSelector(Tepuy.CuentaCongelada.selector, user));
+        vm.prank(user);
+        token.transfer(otro, 1);
+        _freeze(user, false);
+        _forzar(user, otro, 1);
+        _pause();
+        vm.expectRevert(Pausable.EnforcedPause.selector);
+        vm.prank(user);
+        token.transfer(otro, 1);
+        _forzar(user, otro, 1); // sigue funcionando en pausa
+        _recuperar(user, otro);
+        assertEq(token.balanceOf(otro), 10);
+        _unpause();
+        vm.expectRevert(abi.encodeWithSelector(Tepuy.NoVerificado.selector, user)); // la clave recuperada ya no mueve nada
+        vm.prank(user);
+        token.transfer(otro, 1);
+    }
+
+    function _unpause() internal {
+        vm.prank(sup);
+        token.unpause();
+    }
+
+    function testFuzz_forcedKeepsSupply(uint256 n) public {
+        _verify(otro);
+        _mintTo(user, 1000);
+        _freeze(user, true);
+        _pause();
+        n = bound(n, 1, 1000);
+        _forzar(user, otro, n);
+        assertEq(token.totalSupply(), 1000);
+        assertEq(token.balanceOf(user) + token.balanceOf(otro), 1000);
+    }
+
+    function test_recoveryIsOneWay() public {
+        _verify(otro);
+        _mintTo(user, 10);
+        assertFalse(token.isRecovered(user));
+        _recuperar(user, otro);
+        assertTrue(token.isRecovered(user));
+        vm.expectRevert(abi.encodeWithSelector(Tepuy.CuentaYaRecuperada.selector, user));
+        vm.prank(kyc);
+        token.setVerified(user, true);
+        vm.expectRevert(abi.encodeWithSelector(Tepuy.CuentaYaRecuperada.selector, user));
+        vm.prank(sup);
+        token.setAddressFrozen(user, false);
+        // Cerrar (desverificar/congelar) sigue permitido y sin efecto.
+        vm.prank(kyc);
+        token.setVerified(user, false);
+        _freeze(user, true);
+        assertTrue(token.isFrozen(user));
+        assertFalse(token.isVerified(user));
+    }
+
+    /// Fondos recuperados a una cuenta que luego se congela se rescatan por forzada; la recuperada puede ser origen.
+    function test_forcedRescueAfterRecovery() public {
+        address c = makeAddr("c");
+        _verify(otro);
+        _verify(c);
+        _mintTo(user, 10);
+        _recuperar(user, otro);
+        _freeze(otro, true);
+        _recuperar(otro, c);
+        assertEq(token.balanceOf(c), 10);
+        assertTrue(token.isRecovered(otro));
+    }
+
+    function test_motivoLength() public {
+        _verify(otro);
+        _mintTo(user, 10);
+        bytes memory ok = new bytes(256);
+        for (uint256 i; i < 256; i++) ok[i] = "a";
+        vm.prank(rec);
+        token.forcedTransfer(user, otro, 1, string(ok));
+        vm.expectRevert(abi.encodeWithSelector(Tepuy.MotivoLargo.selector, 257));
+        vm.prank(rec);
+        token.forcedTransfer(user, otro, 1, string.concat(string(ok), "a"));
+        vm.expectRevert(abi.encodeWithSelector(Tepuy.MotivoLargo.selector, 257));
+        vm.prank(rec);
+        token.recoveryAddress(user, otro, string.concat(string(ok), "a"));
     }
 }

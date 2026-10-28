@@ -15,6 +15,7 @@ contract TepuyInvariantes is Test {
         address agente = makeAddr("agente");
         address supervisor = makeAddr("supervisor");
         address custodio = makeAddr("custodio");
+        address recuperador = makeAddr("recuperador");
         token = new Tepuy(1 days, admin);
         bytes32 r1 = token.EMISOR();
         bytes32 r2 = token.AGENTE_KYC();
@@ -25,8 +26,9 @@ contract TepuyInvariantes is Test {
         token.grantRole(r1, emisor);
         token.grantRole(r2, agente);
         token.grantRole(r3, supervisor);
+        token.grantRole(token.RECUPERADOR(), recuperador);
         vm.stopPrank();
-        handler = new TepuyHandler(token, emisor, agente, supervisor, custodio);
+        handler = new TepuyHandler(token, emisor, agente, supervisor, custodio, recuperador);
         // Arranque con dos verificados para que haya operaciones exitosas.
         vm.startPrank(agente);
         token.setVerified(handler.actores(0), true);
@@ -50,6 +52,13 @@ contract TepuyInvariantes is Test {
             assertEq(token.totalSupply(), handler.supplyPausa());
             assertEq(handler.sumaSaldos(), handler.saldosPausa());
         }
+    }
+
+    /// Saldo de congeladas solo cambia por forzada/recuperación; las forzadas no tocan el suministro.
+    function invariant_forcedRules() public view {
+        assertEq(handler.violacionesCongelada(), 0);
+        assertEq(handler.violacionesForzada(), 0);
+        assertEq(handler.violacionesReceptorCongelado(), 0);
     }
 
     /// Verdad de base: los saldos suman el suministro y ningún actor con saldo recibió sin KYC.
@@ -121,5 +130,27 @@ contract TepuyInvariantes is Test {
         assertEq(handler.exitos(), 2);
         assertEq(handler.violaciones(), 0);
         assertEq(handler.violacionesPausa(), 0);
+    }
+
+    /// No vacuidad de S7: forzada funciona con origen congelado y en pausa, rechaza receptor malo; recuperación migra.
+    function test_handlerForcedWorks() public {
+        handler.mint(0, 10);
+        handler.setAddressFrozen(0, true);
+        handler.pause(0);
+        handler.forcedTransfer(0, 1, 4); // origen address(0): el contrato la rechaza
+        assertEq(handler.forzadas(), 0);
+        handler.forcedTransfer(4, 1, 4);
+        assertEq(handler.forzadas(), 1);
+        assertEq(token.balanceOf(handler.actores(1)), 4);
+        handler.forcedTransfer(4, 2, 1); // actor 2 sin KYC: rechazada
+        handler.setAddressFrozen(1, true);
+        handler.forcedTransfer(4, 1, 1); // receptor congelado: rechazada
+        assertEq(handler.forzadas(), 1);
+        handler.setAddressFrozen(1, false);
+        handler.recoveryAddress(0, 1);
+        assertEq(handler.forzadas(), 2);
+        assertEq(token.balanceOf(handler.actores(1)), 10);
+        assertEq(token.balanceOf(handler.actores(0)), 0);
+        assertEq(handler.violaciones() + handler.violacionesForzada() + handler.violacionesCongelada(), 0);
     }
 }

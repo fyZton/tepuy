@@ -61,6 +61,8 @@ const abi = [
   "function isFrozen(address) view returns (bool)",
   "function accionesAtestiguadas() view returns (uint256)",
   "function paused() view returns (bool)",
+  "event TransferenciaForzada(address indexed from, address indexed to, uint256 amount, string motivo, address indexed recuperador)",
+  "event CuentaRecuperada(address indexed perdida, address indexed nueva, uint256 saldo, string motivo, address indexed recuperador)",
 ];
 writeFileSync(fileURLToPath(new URL("../web/deployment.json", import.meta.url)), JSON.stringify({
   chainId: Number(chainId),

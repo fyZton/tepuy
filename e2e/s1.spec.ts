@@ -33,6 +33,12 @@ test("muestra 2 inversionistas verificados con saldo 1000 y 0", async ({ page })
   expect(new Set(dirs).size).toBe(2);
 });
 
+test("la sección del recuperador aparece sin movimientos", async ({ page }) => {
+  await page.goto("/");
+  await expect(page.getByRole("heading", { name: "Acciones del recuperador" })).toBeVisible();
+  await expect(page.locator("#forzados-vacio")).toHaveText("Sin movimientos forzados");
+});
+
 test("muestra un error si el nodo no responde", async ({ page }) => {
   await page.route("http://127.0.0.1:8545/**", (route) => route.abort());
   await page.goto("/");
