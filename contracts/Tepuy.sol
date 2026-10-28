@@ -3,6 +3,7 @@ pragma solidity 0.8.28;
 
 import {ERC20} from "@openzeppelin/contracts/token/ERC20/ERC20.sol";
 import {Checkpoints} from "@openzeppelin/contracts/utils/structs/Checkpoints.sol";
+import {Math} from "@openzeppelin/contracts/utils/math/Math.sol";
 import {SafeCast} from "@openzeppelin/contracts/utils/math/SafeCast.sol";
 import {Pausable} from "@openzeppelin/contracts/utils/Pausable.sol";
 import {AccessControlDefaultAdminRules} from "@openzeppelin/contracts/access/extensions/AccessControlDefaultAdminRules.sol";
@@ -151,6 +152,49 @@ contract Tepuy is ERC20, Pausable, AccessControlDefaultAdminRules {
     mapping(address => bool) private _verificados;
     mapping(address => bool) private _congeladas;
     mapping(address => bool) private _recuperadas;
+    mapping(address => address) private _destinoRecuperacion; // perdida => nueva
+
+    /// @notice Saltos máximos al seguir una cadena de recuperaciones.
+    uint256 public constant MAX_SALTOS = 8;
+
+    /// @notice El snapshot ya tiene un dividendo declarado.
+    error DividendoYaDeclarado(uint256 snapId);
+    /// @notice El snapshot no tiene dividendo declarado.
+    error DividendoNoDeclarado(uint256 snapId);
+    /// @notice Numerador o denominador en cero.
+    error ProporcionInvalida(uint256 numerador, uint256 denominador);
+
+    /// @notice El EMISOR declaró un dividendo en acciones sobre un snapshot.
+    /// @param snapId Snapshot (fecha de registro).
+    /// @param numerador Acciones nuevas...
+    /// @param denominador ...por cada tanto en tenencia.
+    /// @param emisor Quien lo declaró.
+    event DividendoDeclarado(uint256 indexed snapId, uint256 numerador, uint256 denominador, address indexed emisor); // solhint-disable-line gas-indexed-events
+    /// @notice Se pagó un dividendo a un tenedor.
+    /// @param snapId Snapshot.
+    /// @param tenedor Titular en el corte.
+    /// @param destino Cuenta que recibió (distinta si hubo recuperación).
+    /// @param monto Acciones acuñadas.
+    event DividendoPagado(uint256 indexed snapId, address indexed tenedor, address indexed destino, uint256 monto); // solhint-disable-line gas-indexed-events
+    /// @notice No se pagó: el destino no está verificado o está congelado. Se puede reintentar.
+    /// @param snapId Snapshot.
+    /// @param tenedor Titular en el corte.
+    /// @param destino Cuenta que debía recibir.
+    /// @param monto Acciones pendientes.
+    event DividendoOmitido(uint256 indexed snapId, address indexed tenedor, address indexed destino, uint256 monto); // solhint-disable-line gas-indexed-events
+    /// @notice Resto fraccionario que se compensa en efectivo fuera de la cadena.
+    /// @param snapId Snapshot.
+    /// @param tenedor Titular en el corte.
+    /// @param destino Cuenta a la que corresponde el efectivo.
+    /// @param resto (saldo * numerador) % denominador.
+    event FraccionPendiente(uint256 indexed snapId, address indexed tenedor, address indexed destino, uint256 resto); // solhint-disable-line gas-indexed-events
+
+    struct Proporcion {
+        uint256 numerador;
+        uint256 denominador;
+    }
+    mapping(uint256 => Proporcion) private _dividendos;
+    mapping(uint256 => mapping(address => bool)) private _pagados;
 
     constructor(uint48 initialDelay, address initialAdmin)
         ERC20("Tepuy Demo", "TPUY")
@@ -178,9 +222,13 @@ contract Tepuy is ERC20, Pausable, AccessControlDefaultAdminRules {
     /// @param to Destinatario.
     /// @param amount Cantidad de acciones.
     function mint(address to, uint256 amount) external onlyRole(EMISOR) {
-        // Todo camino futuro de emisión debe pasar por este chequeo del tope.
-        // Se valida aquí y no en _update para devolver el cupo disponible; mint es el único origen de emisión.
-        // Resta (no suma) para no desbordar con montos enormes: suministro <= atestiguadas siempre.
+        _emitir(to, amount);
+    }
+
+    // Todo camino de emisión (mint y dividendos) pasa por este chequeo del tope.
+    // Se valida aquí y no en _update para devolver el cupo disponible.
+    // Resta (no suma) para no desbordar con montos enormes: suministro <= atestiguadas siempre.
+    function _emitir(address to, uint256 amount) private {
         uint256 disponible = accionesAtestiguadas - totalSupply();
         if (amount > disponible) revert TopeExcedido(amount, disponible);
         _mint(to, amount);
@@ -279,6 +327,72 @@ contract Tepuy is ERC20, Pausable, AccessControlDefaultAdminRules {
         return _bloques[id - 1];
     }
 
+    /// @notice Declara la proporción del dividendo en acciones de un snapshot; solo EMISOR, una vez por snapshot.
+    /// @param snapId Snapshot existente.
+    /// @param numerador Acciones nuevas (> 0).
+    /// @param denominador Por cada tanto en tenencia (> 0).
+    function declararDividendo(uint256 snapId, uint256 numerador, uint256 denominador) external onlyRole(EMISOR) {
+        _bloque(snapId);
+        if (numerador == 0 || denominador == 0) revert ProporcionInvalida(numerador, denominador);
+        if (_dividendos[snapId].denominador != 0) revert DividendoYaDeclarado(snapId);
+        _dividendos[snapId] = Proporcion(numerador, denominador);
+        emit DividendoDeclarado(snapId, numerador, denominador, msg.sender);
+    }
+
+    /// @notice Proporción declarada de un snapshot ((0, 0) si no hay).
+    /// @param snapId Snapshot.
+    /// @return numerador Acciones nuevas.
+    /// @return denominador Por cada tanto en tenencia.
+    function dividendo(uint256 snapId) external view returns (uint256 numerador, uint256 denominador) {
+        Proporcion memory p = _dividendos[snapId];
+        return (p.numerador, p.denominador);
+    }
+
+    /// @notice Indica si ya se pagó (o se saldó en cero) el dividendo de un tenedor.
+    /// @param snapId Snapshot.
+    /// @param tenedor Titular en el corte.
+    /// @return Si ya está pagado.
+    function dividendoPagado(uint256 snapId, address tenedor) external view returns (bool) {
+        return _pagados[snapId][tenedor];
+    }
+
+    /// @notice Paga el dividendo por lotes; solo EMISOR. Idempotente por tenedor.
+    /// @dev Redondea hacia abajo (el resto sale en FraccionPendiente, solo cuando el tenedor queda pagado). Un tenedor recuperado cobra en su cuenta de destino final; si esta no está verificada o está congelada, o la cadena supera MAX_SALTOS (destino = último alcanzado), se omite sin marcar pagado y emite DividendoOmitido de nuevo en cada reintento. Un tope insuficiente o la pausa revierten el lote. Producción usaría Merkle.
+    /// @param snapId Snapshot con dividendo declarado.
+    /// @param tenedores Titulares en el corte.
+    function distribuirDividendo(uint256 snapId, address[] calldata tenedores) external onlyRole(EMISOR) {
+        Proporcion memory p = _dividendos[snapId];
+        if (p.denominador == 0) revert DividendoNoDeclarado(snapId);
+        uint48 corte = _bloque(snapId);
+        for (uint256 i; i < tenedores.length; ++i) {
+            address t = tenedores[i];
+            if (_pagados[snapId][t]) continue;
+            uint256 saldo = _saldos[t].upperLookup(corte);
+            uint256 monto = Math.mulDiv(saldo, p.numerador, p.denominador);
+            address destino = _destinoFinal(t);
+            if (monto != 0) {
+                // Una cadena demasiado larga termina en una cuenta recuperada (sin KYC): también se omite.
+                if (!_verificados[destino] || _congeladas[destino]) {
+                    emit DividendoOmitido(snapId, t, destino, monto);
+                    continue;
+                }
+                _pagados[snapId][t] = true;
+                _emitir(destino, monto);
+                emit DividendoPagado(snapId, t, destino, monto);
+            } else {
+                _pagados[snapId][t] = true;
+            }
+            uint256 resto = mulmod(saldo, p.numerador, p.denominador);
+            if (resto != 0) emit FraccionPendiente(snapId, t, destino, resto);
+        }
+    }
+
+    // Sigue perdida => nueva hasta una cuenta no recuperada (sin ciclos: una recuperada no puede ser receptora).
+    function _destinoFinal(address t) private view returns (address d) {
+        d = t;
+        for (uint256 i; i < MAX_SALTOS && _recuperadas[d]; ++i) d = _destinoRecuperacion[d];
+    }
+
     /// @notice Indica si la cuenta pasó KYC (nombre ERC-3643).
     /// @param cuenta Cuenta a consultar.
     /// @return Si está verificada.
@@ -364,6 +478,7 @@ contract Tepuy is ERC20, Pausable, AccessControlDefaultAdminRules {
         _forzar(perdida, nueva, saldo, motivo);
         // Irreversible: los permisos (approve) de la clave perdida quedan inertes porque nunca puede reactivarse.
         _recuperadas[perdida] = true;
+        _destinoRecuperacion[perdida] = nueva;
         if (!_congeladas[perdida]) {
             _congeladas[perdida] = true;
             emit CongelamientoCambiado(perdida, true, msg.sender);

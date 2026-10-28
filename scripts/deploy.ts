@@ -33,6 +33,9 @@ await (await tepuy.connect(custodio).setAttestedShares(10000)).wait();
 await (await tepuy.connect(emisor).mint(cuentaPrueba.address, 1000)).wait();
 // Fecha de registro de demo (snapshot #1), tras acuñar.
 await (await tepuy.connect(emisor).snapshot()).wait();
+// Dividendo de demo: 1 acción nueva por cada 10 en el corte; se paga a los verificados.
+await (await tepuy.connect(emisor).declararDividendo(1, 1, 10)).wait();
+await (await tepuy.connect(emisor).distribuirDividendo(1, verificados)).wait();
 
 await (await tepuy.beginDefaultAdminTransfer(admin.address)).wait();
 // El retraso se cumple avanzando el reloj; en red real esto sería esperar.
@@ -82,6 +85,12 @@ const abi = [
   "function snapshotBlock(uint256) view returns (uint48)",
   "function balanceOfAt(address, uint256) view returns (uint256)",
   "function totalSupplyAt(uint256) view returns (uint256)",
+  "function dividendo(uint256) view returns (uint256 numerador, uint256 denominador)",
+  "function dividendoPagado(uint256, address) view returns (bool)",
+  "event DividendoDeclarado(uint256 indexed snapId, uint256 numerador, uint256 denominador, address indexed emisor)",
+  "event DividendoPagado(uint256 indexed snapId, address indexed tenedor, address indexed destino, uint256 monto)",
+  "event DividendoOmitido(uint256 indexed snapId, address indexed tenedor, address indexed destino, uint256 monto)",
+  "event FraccionPendiente(uint256 indexed snapId, address indexed tenedor, address indexed destino, uint256 resto)",
   "event SnapshotCreado(uint256 indexed id, uint48 bloque, address indexed emisor)",
   "function ultimoPrecio() view returns (uint256 centimos, bytes32 sha256Archivo, uint32 fecha, uint64 publicadoEn)",
   "event PrecioPublicado(uint32 indexed fecha, uint256 centimos, bytes32 sha256Archivo, address indexed oraculo)",

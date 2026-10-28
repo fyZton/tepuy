@@ -14,6 +14,7 @@ contract TepuyHandler {
     address public immutable custodio;
     address public immutable recuperador;
     address public immutable oraculo;
+    uint256 public constant N_ACTORES = 4;
     address[4] public actores;
     address public constant SPENDER = address(0xB000); // nunca verificado: no necesita KYC
     uint256 public exitos;
@@ -32,6 +33,9 @@ contract TepuyHandler {
     mapping(address => bool) public recibioSinKyc;
     uint256 public violacionesSnapshot; // snapshot con id o suministro de corte incorrecto; debe quedar en 0
     uint256[] public snapSupply; // fantasma: suministro al crear cada snapshot
+    uint256[] public divIds; // snapshots con dividendo declarado (sin repetidos)
+    mapping(uint256 => uint256) public acunado; // fantasma: acciones acuñadas por dividendos de cada snapshot
+    uint256 public violacionesDividendo; // un segundo lote idéntico acuñó algo; debe quedar en 0
     uint256[4][] private _snapSaldos; // fantasma: saldos de los actores al crear cada snapshot
 
     constructor(Tepuy t, address emisor_, address agente_, address supervisor_, address custodio_, address recuperador_, address oraculo_) {
@@ -225,5 +229,37 @@ contract TepuyHandler {
 
     function snapSaldo(uint256 idx, uint256 i) external view returns (uint256) {
         return _snapSaldos[idx][i];
+    }
+
+    function declararDividendo(uint256 seed, uint256 n, uint256 d) external {
+        uint256 cnt = token.snapshotCount();
+        if (cnt == 0) return;
+        uint256 id = 1 + seed % cnt;
+        vm.prank(emisor);
+        try token.declararDividendo(id, 1 + n % 3, 1 + d % 3) {
+            divIds.push(id);
+        } catch {}
+    }
+
+    // Lote con los actores de la máscara (el primero repetido): repetirlo igual no debe acuñar más.
+    function distribuirDividendo(uint256 seed, uint256 mask) external {
+        if (divIds.length == 0) return;
+        uint256 id = divIds[seed % divIds.length];
+        address[] memory ts = new address[](5);
+        ts[0] = actores[0];
+        for (uint256 i; i < 4; i++) ts[i + 1] = (mask >> i) & 1 == 1 ? actores[i] : actores[0];
+        uint256 antes = token.totalSupply();
+        vm.prank(emisor);
+        try token.distribuirDividendo(id, ts) {
+            uint256 medio = token.totalSupply();
+            acunado[id] += medio - antes;
+            vm.prank(emisor);
+            token.distribuirDividendo(id, ts);
+            if (token.totalSupply() != medio) violacionesDividendo++;
+        } catch {}
+    }
+
+    function dividendos() external view returns (uint256) {
+        return divIds.length;
     }
 }

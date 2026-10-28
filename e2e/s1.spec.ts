@@ -2,14 +2,14 @@ import { readFileSync } from "node:fs";
 import { createHash } from "node:crypto";
 import { test, expect } from "@playwright/test";
 
-test("la página muestra Tepuy Demo y suministro 1000", async ({ page }) => {
+test("la página muestra Tepuy Demo y suministro 1100", async ({ page }) => {
   await page.goto("/");
   await expect(page.locator("#name")).toHaveText("Tepuy Demo");
   await expect(page.locator("#symbol")).toHaveText("TPUY");
   await expect(page.locator("#decimals")).toHaveText("0");
-  await expect(page.locator("#supply")).toHaveText("1000");
+  await expect(page.locator("#supply")).toHaveText("1100");
   await expect(page.locator("#attested")).toHaveText("10000");
-  await expect(page.locator("#usoPct")).toHaveText("10%");
+  await expect(page.locator("#usoPct")).toHaveText("11%");
   await expect(page.locator("#mercado")).toHaveText("Abierto");
   await expect(page.getByRole("note")).toContainText("No es un producto oficial");
 });
@@ -22,11 +22,11 @@ test("la tabla de roles tiene 7 filas", async ({ page }) => {
   expect(new Set(dirs).size).toBe(7);
 });
 
-test("muestra 2 inversionistas verificados con saldo 1000 y 0", async ({ page }) => {
+test("muestra 2 inversionistas verificados con saldo 1100 y 0", async ({ page }) => {
   await page.goto("/");
   const filas = page.locator("#verificados tbody tr");
   await expect(filas).toHaveCount(2);
-  await expect(filas.nth(0).locator("td").nth(1)).toHaveText("1000");
+  await expect(filas.nth(0).locator("td").nth(1)).toHaveText("1100");
   await expect(filas.nth(1).locator("td").nth(1)).toHaveText("0");
   await expect(filas.nth(0).locator("td").nth(2)).toHaveText("Activo");
   await expect(filas.nth(1).locator("td").nth(2)).toHaveText("Activo");
@@ -57,6 +57,15 @@ test("muestra el snapshot #1 con el saldo de la fecha de registro", async ({ pag
   await expect(filas).toHaveCount(2);
   await expect(filas.nth(0).locator("td").nth(1)).toHaveText("1000");
   await expect(filas.nth(1).locator("td").nth(1)).toHaveText("0");
+});
+
+test("muestra el dividendo 1:10 y el pago de 100", async ({ page }) => {
+  await page.goto("/");
+  await expect(page.locator("#div-titulo")).toContainText("Snapshot #1: 1 acción nueva por cada 10");
+  const filas = page.locator("#div-pagos tbody tr");
+  await expect(filas).toHaveCount(1);
+  await expect(filas.nth(0).locator("td").nth(0)).toHaveText("Pagado");
+  await expect(filas.nth(0).locator("td").nth(3)).toHaveText("100");
 });
 
 test("muestra un error si el nodo no responde", async ({ page }) => {

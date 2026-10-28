@@ -188,7 +188,7 @@ contract TepuyInvariantes is Test {
             assertEq(token.balanceOfAt(handler.emisor(), id), 0);
             assertEq(token.balanceOfAt(handler.recuperador(), id), 0);
             uint256 suma;
-            for (uint256 k; k < 4; k++) {
+            for (uint256 k; k < handler.N_ACTORES(); k++) {
                 uint256 s = token.balanceOfAt(handler.actores(k), id);
                 assertEq(s, handler.snapSaldo(i, k));
                 suma += s;
@@ -211,5 +211,32 @@ contract TepuyInvariantes is Test {
         assertEq(token.totalSupplyAt(1), 10);
         assertEq(handler.violacionesSnapshot(), 0);
         invariant_snapshotsImmutable();
+    }
+
+    /// Un dividendo nunca se paga dos veces: un lote repetido no acuña y lo acuñado no supera la suma de pisos por tenedor.
+    function invariant_dividendsNeverPaidTwice() public view {
+        assertEq(handler.violacionesDividendo(), 0);
+        for (uint256 i; i < handler.dividendos(); i++) {
+            uint256 id = handler.divIds(i);
+            (uint256 n, uint256 d) = token.dividendo(id);
+            uint256 maximo;
+            for (uint256 k; k < handler.N_ACTORES(); k++) maximo += token.balanceOfAt(handler.actores(k), id) * n / d;
+            assertLe(handler.acunado(id), maximo);
+        }
+    }
+
+    /// No vacuidad de S10: declara, paga, y el segundo lote no acuña; el tope bloquea sin dejar pagos a medias.
+    function test_handlerDividendWorks() public {
+        handler.mint(0, 100);
+        handler.snapshot(1);
+        handler.declararDividendo(0, 0, 0); // snapshot 1, proporción 1:1
+        assertEq(handler.dividendos(), 1);
+        handler.declararDividendo(0, 1, 1); // el mismo snapshot ya tiene dividendo: el contrato lo rechaza
+        assertEq(handler.dividendos(), 1);
+        handler.distribuirDividendo(0, 0);
+        assertEq(handler.acunado(1), 100);
+        assertEq(token.balanceOf(handler.actores(0)), 200);
+        assertEq(handler.violacionesDividendo(), 0);
+        invariant_dividendsNeverPaidTwice();
     }
 }

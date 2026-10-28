@@ -95,6 +95,38 @@ try {
     console.error(e);
     $("snap-vacio").textContent = "No se pudo leer la fecha de registro.";
   }
+  try {
+    const n = await token.snapshotCount();
+    $("div-vacio").textContent = "Aún no hay dividendos";
+    // Último snapshot con dividendo declarado.
+    let id = n;
+    while (id > 0n && (await token.dividendo(id))[1] === 0n) id--;
+    if (id > 0n) {
+      const [num, den] = await token.dividendo(id);
+      $("div-titulo").textContent = `Snapshot #${id}: ${num} acción nueva por cada ${den} en tenencia`;
+      const filtro = (f) => token.queryFilter(f, 0);
+      const evs = (await Promise.all([
+        filtro(token.filters.DividendoPagado(id)), filtro(token.filters.DividendoOmitido(id)), filtro(token.filters.FraccionPendiente(id)),
+      ])).flat().sort((a, b) => a.blockNumber - b.blockNumber || a.index - b.index);
+      $("div-pagos").tBodies[0].replaceChildren();
+      // Estado final por tenedor: una omisión solo se muestra si sigue sin pagarse (y la última de cada tenedor).
+      const pagados = new Map(await Promise.all([...new Set(evs.map((e) => e.args.tenedor))].map(async (t) => [t, await token.dividendoPagado(id, t)])));
+      const ultimaOmision = new Map(evs.filter((e) => e.eventName === "DividendoOmitido").map((e) => [e.args.tenedor, e]));
+      for (const ev of evs) {
+        if (ev.eventName === "DividendoOmitido" && (pagados.get(ev.args.tenedor) || ultimaOmision.get(ev.args.tenedor) !== ev)) continue;
+        const fila = $("div-pagos").tBodies[0].insertRow();
+        const celdas = ev.eventName === "FraccionPendiente"
+          ? ["Fracción pendiente (en efectivo)", ev.args.tenedor, ev.args.destino, ev.args.resto]
+          : [ev.eventName === "DividendoPagado" ? "Pagado" : "Omitido", ev.args.tenedor, ev.args.destino, ev.args.monto];
+        for (const t of celdas) fila.insertCell().textContent = t.toString();
+      }
+      $("div-vacio").hidden = true;
+      $("div").hidden = false;
+    }
+  } catch (e) {
+    console.error(e);
+    $("div-vacio").textContent = "No se pudo leer el dividendo.";
+  }
   const [forzadas, recuperadas] = await Promise.all([
     token.queryFilter(token.filters.TransferenciaForzada()),
     token.queryFilter(token.filters.CuentaRecuperada()),
@@ -116,7 +148,7 @@ try {
 } catch (e) {
   console.error(e);
   $("uso").value = 0;
-  for (const id of ["name", "symbol", "decimals", "supply", "attested", "usoPct", "mercado", "forzados-vacio", "precio-vacio", "snap-vacio"]) $(id).textContent = "—";
+  for (const id of ["name", "symbol", "decimals", "supply", "attested", "usoPct", "mercado", "forzados-vacio", "precio-vacio", "snap-vacio", "div-vacio"]) $(id).textContent = "—";
   $("error").textContent = "No se pudo leer el contrato. Verifica que el nodo local (http://127.0.0.1:8545) esté encendido y que hayas ejecutado el despliegue.";
   $("error").hidden = false;
   $("precio").hidden = true;
