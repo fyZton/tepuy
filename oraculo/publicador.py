@@ -1,4 +1,4 @@
-"""Publica el cierre del archivo diario en Tepuy.publishPrice (solo red local 31337)."""
+"""Publica el cierre del archivo diario en Tepuy.publishPrice (31337, o testnets con CONFIRM_DEPLOY=yes)."""
 import argparse
 import json
 import os
@@ -16,21 +16,36 @@ from oraculo.parser import ArchivoInvalido, leer, precio
 
 RAIZ = Path(__file__).resolve().parent.parent
 CHAIN_ID_LOCAL = 31337
+CHAIN_IDS_PUBLICOS = {421614, 11155111}  # Arbitrum Sepolia, Sepolia
 
 
 class ErrorPublicador(Exception):
     pass
 
 
-def validar_red(chain_id: int) -> None:
-    if chain_id != CHAIN_ID_LOCAL:
-        raise ErrorPublicador(f"Red no permitida (chainId {chain_id}): solo {CHAIN_ID_LOCAL} (local)")
+def confirmado() -> bool:
+    return os.environ.get("CONFIRM_DEPLOY") == "yes"
 
 
-def validar_rpc(rpc: str) -> None:
-    # ponytail: solo loopback hasta S17 (que añadirá redes remotas con confirmación)
-    if urlparse(rpc).hostname not in ("127.0.0.1", "localhost", "::1"):
-        raise ErrorPublicador("RPC no permitido: solo 127.0.0.1, localhost o ::1")
+def validar_red(chain_id: int, escritura: bool = True) -> None:
+    """31337 siempre; testnets públicas: escribir exige CONFIRM_DEPLOY=yes, leer no."""
+    if chain_id == CHAIN_ID_LOCAL or (chain_id in CHAIN_IDS_PUBLICOS and (not escritura or confirmado())):
+        return
+    if chain_id in CHAIN_IDS_PUBLICOS:
+        raise ErrorPublicador(f"La red {chain_id} es pública: escribir exige CONFIRM_DEPLOY=yes")
+    raise ErrorPublicador(f"Red no permitida (chainId {chain_id}): solo {CHAIN_ID_LOCAL} (local), "
+                          f"{sorted(CHAIN_IDS_PUBLICOS)} (testnets)")
+
+
+def validar_rpc(rpc: str, remoto: bool | None = None) -> None:
+    """Loopback siempre; remoto solo https y solo si `remoto` (por defecto: CONFIRM_DEPLOY=yes)."""
+    u = urlparse(rpc)
+    if u.hostname in ("127.0.0.1", "localhost", "::1"):
+        return
+    if not (confirmado() if remoto is None else remoto):
+        raise ErrorPublicador("RPC no permitido: solo 127.0.0.1, localhost o ::1 (remoto exige CONFIRM_DEPLOY=yes)")
+    if u.scheme != "https" or not u.hostname:
+        raise ErrorPublicador("RPC remoto no permitido: solo https")
 
 
 def preparar(datos: bytes, ticker: str) -> dict[str, Any]:
@@ -100,7 +115,7 @@ def _ultimo(c: Any) -> tuple[int, bytes, int, int]:
 def publicar(args: argparse.Namespace) -> dict[str, Any]:
     prep = preparar(leer(args.archivo), args.ticker)
     rpc = args.rpc or os.environ.get("TEPUY_RPC") or "http://127.0.0.1:8545"
-    validar_rpc(rpc)
+    validar_rpc(rpc, remoto=True if args.dry_run else None)  # dry-run: solo lectura
     abi, addr = _cargar(args.contrato)
     clave = os.environ.get("TEPUY_ORACULO_KEY")
     if not args.dry_run and not clave:
@@ -113,7 +128,7 @@ def publicar(args: argparse.Namespace) -> dict[str, Any]:
             raise ErrorPublicador(f"No hay conexión con {rpc}") from e
         chain_id = None
     if chain_id is not None:
-        validar_red(chain_id)
+        validar_red(chain_id, escritura=not args.dry_run)
     c = w3.eth.contract(address=addr, abi=abi) if chain_id is not None else None
     ultimo = None
     if c is not None:

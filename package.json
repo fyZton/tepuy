@@ -27,7 +27,8 @@
     "e2e": "playwright test",
     "lint:sol": "solhint \"contracts/**/*.sol\"",
     "prepare:web": "node -e \"const f=require('node:fs');f.mkdirSync('web/vendor',{recursive:true});f.copyFileSync('node_modules/ethers/dist/ethers.min.js','web/vendor/ethers.min.js')\"",
+    "test:despliegue": "node scripts/test-despliegue.mjs",
     "slither": "node scripts/slither.mjs",
-    "check": "npm run lint:sol && npm test && npm run slither"
+    "check": "npm run lint:sol && npm test && npm run test:despliegue && npm run slither"
   }
 }

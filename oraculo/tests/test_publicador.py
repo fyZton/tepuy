@@ -158,3 +158,76 @@ def test_integracion(nodo: Web3, monkeypatch: pytest.MonkeyPatch, capsys: pytest
         c.functions.publishPrice(1, 20991231, b"\x01" * 32).call({"from": Account.from_key(K6).address})
     d = pub._datos_revert(ei.value)
     assert d and pub.decodificar_error(art["abi"], d).startswith("FechaFutura(20991231")
+
+
+@pytest.mark.parametrize("cid", [421614, 11155111])
+def test_red_publica_confirmacion(monkeypatch: pytest.MonkeyPatch, cid: int) -> None:
+    monkeypatch.delenv("CONFIRM_DEPLOY", raising=False)
+    with pytest.raises(pub.ErrorPublicador, match="CONFIRM_DEPLOY"):
+        pub.validar_red(cid)
+    pub.validar_red(cid, escritura=False)  # lectura (monitor) sin confirmar
+    monkeypatch.setenv("CONFIRM_DEPLOY", "yes")
+    pub.validar_red(cid)
+    with pytest.raises(pub.ErrorPublicador):
+        pub.validar_red(1)
+
+
+def test_rpc_remoto(monkeypatch: pytest.MonkeyPatch) -> None:
+    url = "https://sepolia-rollup.arbitrum.io/rpc"
+    monkeypatch.delenv("CONFIRM_DEPLOY", raising=False)
+    with pytest.raises(pub.ErrorPublicador, match="CONFIRM_DEPLOY"):
+        pub.validar_rpc(url)
+    pub.validar_rpc(url, remoto=True)  # monitor: lectura
+    monkeypatch.setenv("CONFIRM_DEPLOY", "yes")
+    pub.validar_rpc(url)
+    for malo in ("http://sepolia-rollup.arbitrum.io/rpc", "ftp://x.io", "//x.io"):
+        with pytest.raises(pub.ErrorPublicador, match="https"):
+            pub.validar_rpc(malo)
+        with pytest.raises(pub.ErrorPublicador, match="https"):
+            pub.validar_rpc(malo, remoto=True)
+
+
+@pytest.mark.parametrize("confirm,ok", [(None, False), ("yes", True)])
+def test_publicar_red_publica_simulada(monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str],
+                                       confirm: str | None, ok: bool) -> None:
+    """chainId 421614 simulado (mock, sin red): sin confirmar rechaza; confirmado pasa la guardia."""
+    monkeypatch.setenv("TEPUY_ORACULO_KEY", K6)
+    monkeypatch.delenv("CONFIRM_DEPLOY", raising=False)
+    if confirm:
+        monkeypatch.setenv("CONFIRM_DEPLOY", confirm)
+
+    class Falso:
+        HTTPProvider = staticmethod(lambda *a, **k: None)
+        is_address = staticmethod(Web3.is_address)
+        to_checksum_address = staticmethod(Web3.to_checksum_address)
+
+        def __init__(self, _: object) -> None:
+            self.eth = SimpleNamespace(chain_id=421614)  # sin .contract: falla justo tras la guardia
+
+    monkeypatch.setattr(pub, "Web3", Falso)
+    assert pub.main(args()) == 1
+    err = capsys.readouterr().err
+    # Con confirmación supera validar_red y falla más adelante (.contract); sin ella, falla en la guardia.
+    assert ("CONFIRM_DEPLOY" not in err) == ok
+    assert ("AttributeError" in err) == ok
+
+
+def test_dry_run_red_publica_sin_confirmar(monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]) -> None:
+    """--dry-run con RPC https remoto y chainId 421614 simulado: pasa las guardias sin CONFIRM_DEPLOY."""
+    monkeypatch.delenv("CONFIRM_DEPLOY", raising=False)
+
+    class Falso:
+        HTTPProvider = staticmethod(lambda *a, **k: None)
+        is_address = staticmethod(Web3.is_address)
+        to_checksum_address = staticmethod(Web3.to_checksum_address)
+
+        def __init__(self, _: object) -> None:
+            self.eth = SimpleNamespace(chain_id=421614)  # sin .contract: falla justo tras las guardias
+
+    monkeypatch.setattr(pub, "Web3", Falso)
+    a = ["--rpc", "https://ejemplo.org/rpc", "--dry-run"]
+    assert pub.main([str(FIX), "--ticker", "MVZ.A", *a]) == 1
+    err = capsys.readouterr().err
+    assert "AttributeError" in err and "CONFIRM_DEPLOY" not in err
+    assert pub.main([str(FIX), "--ticker", "MVZ.A", "--rpc", "https://ejemplo.org/rpc"]) == 1  # sin dry-run sigue rechazando
+    assert "CONFIRM_DEPLOY" in capsys.readouterr().err

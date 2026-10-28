@@ -20,3 +20,5 @@ web/vendor/
 test-results/
 playwright-report/
 .monitor-estado.json
+web/deployment.simArbitrum.json
+web/deployment.simAjena.json

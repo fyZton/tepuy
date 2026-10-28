@@ -2,19 +2,55 @@ import { readFileSync, writeFileSync } from "node:fs";
 import { createHash } from "node:crypto";
 import { fileURLToPath } from "node:url";
 import { network } from "hardhat";
-import { ZeroAddress } from "ethers";
+import { verificarRoles } from "./verificar-roles.ts";
 
 const RETRASO_ADMIN_SEG = 86400; // 1 día
 
-const { ethers } = await network.getOrCreate();
+const { ethers, networkConfig, networkName } = await network.getOrCreate();
 
 const { chainId } = await ethers.provider.getNetwork();
-if (chainId !== 31337n) throw new Error(`Solo redes locales (31337), chainId actual: ${chainId}`);
+const local = chainId === 31337n;
+if (!local && ![421614n, 11155111n].includes(chainId)) throw new Error(`chainId no permitido: ${chainId} (solo 31337, 421614 y 11155111)`);
+const simulada = networkConfig.type === "edr-simulated"; // en proceso: se puede avanzar el reloj
 
 // Cuentas por defecto de Hardhat: 0 desplegador, 1 admin final, 2 emisor, 3 custodio,
 // 4 agenteKyc, 5 supervisor, 6 oraculo, 7 recuperador, 8 cuenta de prueba, 9 inversionista B.
 const [desplegador, admin, emisor, custodio, agenteKyc, supervisor, oraculo, recuperador, cuentaPrueba, inversionistaB] =
   await ethers.getSigners();
+const demo = local || cuentaPrueba !== undefined && inversionistaB !== undefined; // sin inversionistas se omiten los pasos demo
+
+if (!local) {
+  // Red pública (o simulada con su chainId): sin CONFIRM_DEPLOY solo se imprime el plan y no se envía nada.
+  const confirmado = process.env.CONFIRM_DEPLOY === "yes";
+  const cuentas = [["desplegador", desplegador], ["admin", admin], ["emisor", emisor], ["custodio", custodio], ["agenteKyc", agenteKyc],
+    ["supervisor", supervisor], ["oraculo", oraculo], ["recuperador", recuperador],
+    ...(demo ? [["inversionistaA", cuentaPrueba], ["inversionistaB", inversionistaB]] : [])] as const;
+  const problemas: string[] = [];
+  console.log(`Red: ${networkName}  chainId: ${chainId}${simulada ? "  (simulada en proceso)" : ""}`);
+  if (desplegador === undefined || recuperador === undefined) {
+    // Solo nombres de variables, nunca valores.
+    for (const n of ["DESPLEGADOR", "ADMIN", "EMISOR", "CUSTODIO", "KYC", "SUPERVISOR", "ORACULO", "RECUPERADOR"]) {
+      const v = (process.env[`TEPUY_KEY_${n}`] ?? "").trim();
+      if (!/^0x[0-9a-fA-F]{64}$/.test(v)) problemas.push(`TEPUY_KEY_${n} ${v ? "no tiene formato 0x + 64 hex" : "no está definida"} (ver .env.example)`);
+    }
+  } else {
+    if (new Set(cuentas.map(([, s]) => s.address)).size !== cuentas.length) problemas.push("Cada rol necesita una cuenta distinta (hay direcciones repetidas)");
+    for (const [rol, s] of cuentas) {
+      const saldo = await ethers.provider.getBalance(s.address);
+      console.log(`  ${rol.padEnd(15)} ${s.address}  ${ethers.formatEther(saldo)} ETH`);
+      if (saldo === 0n && !["supervisor", "recuperador", "inversionistaA", "inversionistaB"].includes(rol)) problemas.push(`${rol} no tiene gas`);
+    }
+    if (!demo) console.log("Aviso: sin TEPUY_KEY_INVERSIONISTA_A/B se omiten los pasos demo (KYC, acuñación, snapshot, dividendo).");
+    console.log(`Haría: desplegar Tepuy (retraso admin ${RETRASO_ADMIN_SEG} s), otorgar 6 roles, publicar el precio${demo ? ", pasos demo" : ""}, `
+      + `iniciar el traspaso del admin${simulada ? " y aceptarlo (reloj simulado)" : " (aceptarlo tras 24 h con scripts/aceptar-admin.ts)"}, escribir web/deployment.${networkName}.json.`);
+  }
+  for (const p of problemas) console.log(`PROBLEMA: ${p}`);
+  if (!confirmado || problemas.length) {
+    const nonce = desplegador === undefined ? 0 : await ethers.provider.getTransactionCount(desplegador.address);
+    console.log(`Plan: no se envió ninguna transacción (nonce del desplegador: ${nonce}, bloque: ${await ethers.provider.getBlockNumber()}). Para desplegar: CONFIRM_DEPLOY=yes`);
+    process.exit(confirmado ? 1 : 0); // con confirmación pero con problemas: error
+  }
+}
 const tepuy = await ethers.deployContract("Tepuy", [RETRASO_ADMIN_SEG, desplegador.address]);
 await tepuy.waitForDeployment();
 
@@ -26,35 +62,29 @@ const roles = {
 for (const [signer, nombre] of Object.values(roles)) {
   await (await tepuy.grantRole(await tepuy[nombre](), signer.address)).wait();
 }
-const verificados = [cuentaPrueba.address, inversionistaB.address];
-for (const v of verificados) await (await tepuy.connect(agenteKyc).setVerified(v, true)).wait();
-// El custodio atestigua antes de que el emisor pueda acuñar.
-await (await tepuy.connect(custodio).setAttestedShares(10000)).wait();
-await (await tepuy.connect(emisor).mint(cuentaPrueba.address, 1000)).wait();
-// Fecha de registro de demo (snapshot #1), tras acuñar.
-await (await tepuy.connect(emisor).snapshot()).wait();
-// Dividendo de demo: 1 acción nueva por cada 10 en el corte; se paga a los verificados.
-await (await tepuy.connect(emisor).declararDividendo(1, 1, 10)).wait();
-await (await tepuy.connect(emisor).distribuirDividendo(1, verificados)).wait();
+const verificados = demo ? [cuentaPrueba.address, inversionistaB.address] : [];
+if (demo) {
+  for (const v of verificados) await (await tepuy.connect(agenteKyc).setVerified(v, true)).wait();
+  // El custodio atestigua antes de que el emisor pueda acuñar.
+  await (await tepuy.connect(custodio).setAttestedShares(10000)).wait();
+  await (await tepuy.connect(emisor).mint(cuentaPrueba.address, 1000)).wait();
+  // Fecha de registro de demo (snapshot #1), tras acuñar.
+  await (await tepuy.connect(emisor).snapshot()).wait();
+  // Dividendo de demo: 1 acción nueva por cada 10 en el corte; se paga a los verificados.
+  await (await tepuy.connect(emisor).declararDividendo(1, 1, 10)).wait();
+  await (await tepuy.connect(emisor).distribuirDividendo(1, verificados)).wait();
+}
 
 await (await tepuy.beginDefaultAdminTransfer(admin.address)).wait();
-// El retraso se cumple avanzando el reloj; en red real esto sería esperar.
-await ethers.provider.send("evm_increaseTime", [RETRASO_ADMIN_SEG + 1]);
-await ethers.provider.send("evm_mine", []);
-await (await tepuy.connect(admin).acceptDefaultAdminTransfer()).wait();
+// El retraso se cumple avanzando el reloj; en red pública hay que esperarlo (scripts/aceptar-admin.ts).
+const traspasoPendiente = !local && !simulada;
+if (!traspasoPendiente) {
+  await ethers.provider.send("evm_increaseTime", [RETRASO_ADMIN_SEG + 1]);
+  await ethers.provider.send("evm_mine", []);
+  await (await tepuy.connect(admin).acceptDefaultAdminTransfer()).wait();
 
-if ((await tepuy.defaultAdmin()) !== admin.address) throw new Error("defaultAdmin inesperado");
-if ((await tepuy.pendingDefaultAdmin())[0] !== ZeroAddress) throw new Error("Queda un traspaso de admin pendiente");
-for (const cuenta of [desplegador, admin, ...Object.values(roles).map(([s]) => s)]) {
-  const esperados = [
-    ...(cuenta === admin ? [await tepuy.DEFAULT_ADMIN_ROLE()] : []),
-    ...(await Promise.all(Object.values(roles).filter(([s]) => s === cuenta).map(([, n]) => tepuy[n]()))),
-  ];
-  const todos = [await tepuy.DEFAULT_ADMIN_ROLE(), ...(await Promise.all(Object.values(roles).map(([, n]) => tepuy[n]())))];
-  for (const rol of todos) {
-    if ((await tepuy.hasRole(rol, cuenta.address)) !== esperados.includes(rol)) throw new Error(`Roles inesperados en ${cuenta.address}`);
-  }
-}
+  await verificarRoles(tepuy, desplegador.address, { admin: admin.address, ...Object.fromEntries(Object.entries(roles).map(([k, [v]]) => [k, v.address])) } as Parameters<typeof verificarRoles>[2]);
+} else console.log("Traspaso del admin iniciado: tras 24 h ejecuta scripts/aceptar-admin.ts (el desplegador conserva el rol hasta entonces).");
 
 // Precio de demo: línea "R|" de MVZ.A y fecha de "IG|DDMMAAAA|" del archivo oficial (bytes; latin-1), SHA-256 del archivo completo.
 const archivo = readFileSync(fileURLToPath(new URL("../oraculo/tests/fixtures/20261027.dat", import.meta.url)));
@@ -67,7 +97,7 @@ if (!linea) throw new Error("MVZ.A no está en el fixture");
 const [ent, dec = ""] = linea.split("|")[4].split("."); // decimales por texto, sin float
 if (!/^[0-9]+$/.test(ent) || !/^[0-9]{0,2}$/.test(dec)) throw new Error(`Cierre inválido: ${linea}`);
 const centimos = BigInt(ent + dec.padEnd(2, "0"));
-await (await tepuy.connect(oraculo).publishPrice(centimos, fecha,"0x" + createHash("sha256").update(archivo).digest("hex"))).wait();
+await (await tepuy.connect(oraculo).publishPrice(centimos, fecha, "0x" + createHash("sha256").update(archivo).digest("hex"))).wait();
 
 const address = await tepuy.getAddress();
 const abi = [
@@ -103,12 +133,16 @@ const abi = [
   "event Paused(address account)",
   "event Unpaused(address account)",
 ];
-writeFileSync(fileURLToPath(new URL("../web/deployment.json", import.meta.url)), JSON.stringify({
+const sinKyc = (await ethers.getSigners())[14]; // en red pública casi nunca existe: se omite
+writeFileSync(fileURLToPath(new URL(`../web/deployment${local ? "" : `.${networkName}`}.json`, import.meta.url)), JSON.stringify({
   chainId: Number(chainId),
   address,
   verificados,
+  // Cuenta 14 de Hardhat: sin roles ni KYC y fuera del simulador (usa 8-13). Demo de transferencia rechazada (S16).
+  ...(sinKyc && { sinKyc: sinKyc.address }),
   // Nombres ficticios para la web (siempre "(demo)").
-  etiquetas: { [cuentaPrueba.address]: "Ana (demo)", [inversionistaB.address]: "Bruno (demo)" },
+  etiquetas: { ...(demo && { [cuentaPrueba.address]: "Ana (demo)", [inversionistaB.address]: "Bruno (demo)" }), ...(sinKyc && { [sinKyc.address]: "Persona sin verificar (demo)" }) },
+  ...(traspasoPendiente && { traspasoAdminPendiente: true }),
   roles: { admin: admin.address, ...Object.fromEntries(Object.entries(roles).map(([k, [v]]) => [k, v.address])) },
   abi,
 }, null, 2));

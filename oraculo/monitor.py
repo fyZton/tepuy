@@ -1,4 +1,4 @@
-"""Vigila los eventos de Tepuy y avisa por Telegram (solo red local 31337)."""
+"""Vigila los eventos de Tepuy y avisa por Telegram (31337 o testnets; solo lectura)."""
 import argparse
 import http.client
 import json
@@ -318,7 +318,7 @@ def bucle(paso: Callable[[], None], estado: dict[str, Any], ruta: Path, dry: boo
 
 def monitorear(args: argparse.Namespace) -> None:
     rpc = args.rpc or os.environ.get("TEPUY_RPC") or "http://127.0.0.1:8545"
-    validar_rpc(rpc)
+    validar_rpc(rpc, remoto=True)  # solo lectura: sin confirmación
     if not args.dry_run and not all(_secretos()):
         raise ErrorPublicador("Faltan TELEGRAM_TOKEN y TELEGRAM_CHAT_ID (o usa --dry-run)")
     abi, addr = _cargar(args.contrato)
@@ -327,7 +327,7 @@ def monitorear(args: argparse.Namespace) -> None:
         chain_id = w3.eth.chain_id
     except Exception as e:
         raise ErrorPublicador(f"No hay conexión con {rpc}") from e
-    validar_red(chain_id)
+    validar_red(chain_id, escritura=False)
     if not w3.eth.get_code(addr):
         raise ErrorPublicador(f"No hay contrato en {addr}")
     c = w3.eth.contract(address=addr, abi=abi)

@@ -1,3 +1,4 @@
+from types import SimpleNamespace
 import io
 import json
 import urllib.error
@@ -219,8 +220,27 @@ def test_dry_run_sin_telegram(monkeypatch: pytest.MonkeyPatch, capsys: pytest.Ca
 
 
 def test_rpc_remoto_rechazado(capsys: pytest.CaptureFixture[str]) -> None:
-    assert mon.main(["--rpc", "https://ejemplo.org/rpc", "--dry-run"]) == 1
-    assert "RPC no permitido" in capsys.readouterr().err
+    assert mon.main(["--rpc", "http://ejemplo.org/rpc", "--dry-run"]) == 1  # remoto sin https
+    assert "solo https" in capsys.readouterr().err
+
+
+def test_red_publica_simulada_solo_lectura(monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]) -> None:
+    """chainId 421614 simulado (mock, sin red): el monitor pasa la guardia sin CONFIRM_DEPLOY."""
+    monkeypatch.delenv("CONFIRM_DEPLOY", raising=False)
+
+    class Falso:
+        HTTPProvider = staticmethod(lambda *a, **k: None)
+        keccak = staticmethod(Web3.keccak)
+        is_address = staticmethod(Web3.is_address)
+        to_checksum_address = staticmethod(Web3.to_checksum_address)
+
+        def __init__(self, _: object) -> None:
+            self.eth = SimpleNamespace(chain_id=421614)  # sin get_code: falla justo tras la guardia
+
+    monkeypatch.setattr(mon, "Web3", Falso)
+    assert mon.main(["--rpc", "https://ejemplo.org/rpc", "--dry-run", "--una-vez"]) == 1
+    err = capsys.readouterr().err
+    assert "AttributeError" in err and "CONFIRM_DEPLOY" not in err
 
 
 @pytest.fixture(scope="module")
