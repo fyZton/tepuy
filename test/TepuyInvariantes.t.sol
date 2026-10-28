@@ -14,21 +14,27 @@ contract TepuyInvariantes is Test {
         address emisor = makeAddr("emisor");
         address agente = makeAddr("agente");
         address supervisor = makeAddr("supervisor");
+        address custodio = makeAddr("custodio");
         token = new Tepuy(1 days, admin);
         bytes32 r1 = token.EMISOR();
         bytes32 r2 = token.AGENTE_KYC();
         bytes32 r3 = token.SUPERVISOR();
+        bytes32 r4 = token.CUSTODIO();
         vm.startPrank(admin);
+        token.grantRole(r4, custodio);
         token.grantRole(r1, emisor);
         token.grantRole(r2, agente);
         token.grantRole(r3, supervisor);
         vm.stopPrank();
-        handler = new TepuyHandler(token, emisor, agente, supervisor);
+        handler = new TepuyHandler(token, emisor, agente, supervisor, custodio);
         // Arranque con dos verificados para que haya operaciones exitosas.
         vm.startPrank(agente);
         token.setVerified(handler.actores(0), true);
         token.setVerified(handler.actores(1), true);
         vm.stopPrank();
+        // Atestiguación inicial para que haya emisiones exitosas.
+        vm.prank(custodio);
+        token.setAttestedShares(5000);
         targetContract(address(handler));
     }
 
@@ -44,6 +50,11 @@ contract TepuyInvariantes is Test {
             address a = handler.actores(i);
             if (token.balanceOf(a) > 0) assertFalse(handler.recibioSinKyc(a));
         }
+    }
+
+    /// Nunca hay más tokens que acciones atestiguadas.
+    function invariant_supplyWithinAttested() public view {
+        assertLe(token.totalSupply(), token.accionesAtestiguadas());
     }
 
     /// No vacuidad: el handler sí logra mint, transfer y transferFrom exitosos (con estado inicial fijo).
@@ -69,5 +80,21 @@ contract TepuyInvariantes is Test {
         handler.transfer(0, 1, 4);
         assertEq(handler.exitos(), 2);
         assertEq(handler.violaciones(), 0);
+    }
+
+    /// No vacuidad del tope: sin cupo el mint falla; bajar del suministro falla; subir reabre el cupo.
+    function test_handlerCapBlocks() public {
+        handler.setAttestedShares(0);
+        handler.mint(0, 1);
+        assertEq(handler.exitos(), 0);
+        handler.setAttestedShares(10);
+        handler.mint(0, 10);
+        assertEq(handler.exitos(), 1);
+        handler.setAttestedShares(3); // bajo el suministro: el contrato revierte y el handler lo absorbe
+        assertEq(token.accionesAtestiguadas(), 10);
+        handler.setAttestedShares(20);
+        handler.mint(0, 10);
+        assertEq(handler.exitos(), 2);
+        assertEq(token.totalSupply(), 20);
     }
 }

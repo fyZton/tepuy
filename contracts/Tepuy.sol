@@ -12,7 +12,7 @@ contract Tepuy is ERC20, AccessControlDefaultAdminRules {
     /// @notice Rol autorizado a emitir acciones.
     bytes32 public constant EMISOR = keccak256("EMISOR");
 
-    /// @notice Custodio (CVV); sus funciones llegan en S5.
+    /// @notice Custodio (CVV): atestigua las acciones que tiene en custodia.
     bytes32 public constant CUSTODIO = keccak256("CUSTODIO");
     /// @notice Verifica identidad de inversionistas (S3).
     bytes32 public constant AGENTE_KYC = keccak256("AGENTE_KYC");
@@ -49,6 +49,21 @@ contract Tepuy is ERC20, AccessControlDefaultAdminRules {
     /// @param supervisor Quien lo cambió.
     event CongelamientoCambiado(address indexed cuenta, bool congelada, address indexed supervisor); // solhint-disable-line gas-indexed-events
 
+    /// @notice Se intentó emitir más que el tope atestiguado.
+    error TopeExcedido(uint256 solicitado, uint256 disponible);
+    /// @notice La atestiguación nueva es menor que el suministro.
+    error AtestiguacionInsuficiente(uint256 nuevas, uint256 suministro);
+
+    /// @notice Cambió la cantidad de acciones atestiguadas.
+    /// @param anterior Valor previo.
+    /// @param nueva Valor nuevo.
+    /// @param custodio Quien lo cambió.
+    event AtestiguacionCambiada(uint256 anterior, uint256 nueva, address indexed custodio); // solhint-disable-line gas-indexed-events
+
+    /// @notice Acciones atestiguadas en custodia; tope del suministro. Arranca en 0.
+    /// @dev Afirmación del CUSTODIO, no prueba de custodia: el tope es tan honesto como él.
+    uint256 public accionesAtestiguadas;
+
     mapping(address => bool) private _verificados;
     mapping(address => bool) private _congeladas;
 
@@ -78,7 +93,23 @@ contract Tepuy is ERC20, AccessControlDefaultAdminRules {
     /// @param to Destinatario.
     /// @param amount Cantidad de acciones.
     function mint(address to, uint256 amount) external onlyRole(EMISOR) {
+        // Todo camino futuro de emisión debe pasar por este chequeo del tope.
+        // Se valida aquí y no en _update para devolver el cupo disponible; mint es el único origen de emisión.
+        // Resta (no suma) para no desbordar con montos enormes: suministro <= atestiguadas siempre.
+        uint256 disponible = accionesAtestiguadas - totalSupply();
+        if (amount > disponible) revert TopeExcedido(amount, disponible);
         _mint(to, amount);
+    }
+
+    /// @notice Fija las acciones atestiguadas; solo CUSTODIO. No puede quedar bajo el suministro.
+    /// @dev Confianza: CUSTODIO+EMISOR coludidos pueden sobreemitir; un CUSTODIO malicioso puede bloquear emisión.
+    /// @param nuevas Nueva cantidad atestiguada.
+    function setAttestedShares(uint256 nuevas) external onlyRole(CUSTODIO) {
+        if (nuevas < totalSupply()) revert AtestiguacionInsuficiente(nuevas, totalSupply());
+        uint256 anterior = accionesAtestiguadas;
+        if (anterior == nuevas) return; // sin cambio: sin escritura ni evento
+        accionesAtestiguadas = nuevas;
+        emit AtestiguacionCambiada(anterior, nuevas, msg.sender);
     }
 
     /// @notice Indica si la cuenta pasó KYC (nombre ERC-3643).

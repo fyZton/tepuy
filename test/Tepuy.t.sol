@@ -15,6 +15,8 @@ contract TepuyTest is Test {
     address kyc = makeAddr("kyc");
     address sup = makeAddr("sup");
     address otro = makeAddr("otro");
+    address cust = makeAddr("cust");
+    uint256 constant TOPE = type(uint128).max;
 
     function setUp() public {
         token = new Tepuy(1 days, admin);
@@ -29,6 +31,15 @@ contract TepuyTest is Test {
         token.grantRole(supRole, sup);
         vm.prank(kyc);
         token.setVerified(user, true);
+        bytes32 custRole = token.CUSTODIO();
+        vm.prank(admin);
+        token.grantRole(custRole, cust);
+        _attest(TOPE); // holgura para los demás tests; los del tope fijan su propio valor
+    }
+
+    function _attest(uint256 n) internal {
+        vm.prank(cust);
+        token.setAttestedShares(n);
     }
 
     function _freeze(address who, bool c) internal {
@@ -507,5 +518,102 @@ contract TepuyTest is Test {
         vm.expectRevert(abi.encodeWithSelector(IRules.AccessControlInvalidDefaultAdmin.selector, user));
         token.acceptDefaultAdminTransfer();
         assertEq(token.defaultAdmin(), admin);
+    }
+
+    function test_startsAtZeroAndMintBlocked() public {
+        Tepuy t = new Tepuy(1 days, admin);
+        bytes32 role = t.EMISOR();
+        vm.prank(admin);
+        t.grantRole(role, emisor);
+        assertEq(t.accionesAtestiguadas(), 0);
+        vm.expectRevert(abi.encodeWithSelector(Tepuy.TopeExcedido.selector, 1, 0));
+        vm.prank(emisor);
+        t.mint(user, 1);
+    }
+
+    function test_mintUpToExactCapThenOneMoreReverts() public {
+        _attest(10);
+        _mintTo(user, 10);
+        assertEq(token.accionesAtestiguadas(), token.totalSupply());
+        vm.expectRevert(abi.encodeWithSelector(Tepuy.TopeExcedido.selector, 1, 0));
+        _mintTo(user, 1);
+    }
+
+    function test_mintOverCapReportsAvailable() public {
+        _attest(10);
+        _mintTo(user, 4);
+        vm.expectRevert(abi.encodeWithSelector(Tepuy.TopeExcedido.selector, 7, 6));
+        _mintTo(user, 7);
+    }
+
+    function test_setAttestedOnlyCustodio() public {
+        bytes32 role = token.CUSTODIO();
+        address[3] memory otros = [admin, emisor, otro];
+        for (uint256 i; i < 3; i++) {
+            _unauth(otros[i], role);
+            vm.prank(otros[i]);
+            token.setAttestedShares(1);
+        }
+    }
+
+    function test_lowerBelowSupplyReverts() public {
+        _attest(10);
+        _mintTo(user, 6);
+        vm.expectRevert(abi.encodeWithSelector(Tepuy.AtestiguacionInsuficiente.selector, 5, 6));
+        _attest(5);
+        assertEq(token.accionesAtestiguadas(), 10);
+    }
+
+    function test_lowerToExactSupplyWorks() public {
+        _attest(10);
+        _mintTo(user, 6);
+        _attest(6);
+        assertEq(token.accionesAtestiguadas(), 6);
+        vm.expectRevert(abi.encodeWithSelector(Tepuy.TopeExcedido.selector, 1, 0));
+        _mintTo(user, 1);
+    }
+
+    function test_raiseAllowsMoreMint() public {
+        _attest(5);
+        _mintTo(user, 5);
+        _attest(8);
+        _mintTo(user, 3);
+        assertEq(token.totalSupply(), 8);
+    }
+
+    function test_attestEmitsEvent() public {
+        _attest(5);
+        vm.expectEmit(true, false, false, true, address(token));
+        emit Tepuy.AtestiguacionCambiada(5, 9, cust);
+        _attest(9);
+    }
+
+    function test_attestNoChangeEmitsNothing() public {
+        _attest(5);
+        vm.recordLogs();
+        _attest(5);
+        assertEq(vm.getRecordedLogs().length, 0);
+    }
+
+    function testFuzz_mintRespectsCap(uint256 tope, uint256 amount) public {
+        _attest(tope);
+        if (amount > tope) vm.expectRevert(abi.encodeWithSelector(Tepuy.TopeExcedido.selector, amount, tope));
+        _mintTo(user, amount);
+        assertLe(token.totalSupply(), token.accionesAtestiguadas());
+    }
+
+    function testFuzz_cannotLowerBelowSupply(uint256 supply, uint256 nuevas) public {
+        supply = bound(supply, 1, 1e30);
+        nuevas = bound(nuevas, 0, supply - 1);
+        _mintTo(user, supply);
+        vm.expectRevert(abi.encodeWithSelector(Tepuy.AtestiguacionInsuficiente.selector, nuevas, supply));
+        _attest(nuevas);
+    }
+
+    /// El tope se evalúa antes que el KYC del receptor.
+    function test_capCheckedBeforeKyc() public {
+        _attest(1);
+        vm.expectRevert(abi.encodeWithSelector(Tepuy.TopeExcedido.selector, 2, 1));
+        _mintTo(otro, 2); // otro sin KYC y fuera de tope
     }
 }

@@ -10,17 +10,19 @@ contract TepuyHandler {
     address public immutable emisor;
     address public immutable agente;
     address public immutable supervisor;
+    address public immutable custodio;
     address[4] public actores;
     address public constant SPENDER = address(0xB000); // nunca verificado: no necesita KYC
     uint256 public exitos;
     uint256 public violaciones; // debe quedar en 0
     mapping(address => bool) public recibioSinKyc;
 
-    constructor(Tepuy t, address emisor_, address agente_, address supervisor_) {
+    constructor(Tepuy t, address emisor_, address agente_, address supervisor_, address custodio_) {
         token = t;
         emisor = emisor_;
         agente = agente_;
         supervisor = supervisor_;
+        custodio = custodio_;
         for (uint160 i; i < 4; i++) actores[i] = address(0xA000 + i);
     }
 
@@ -49,6 +51,12 @@ contract TepuyHandler {
     function setAddressFrozen(uint256 i, bool c) external {
         vm.prank(supervisor);
         token.setAddressFrozen(_actor(i), c);
+    }
+
+    // Valores en [0, 3000]: a veces quedan bajo el suministro y el contrato debe rechazarlos.
+    function setAttestedShares(uint256 n) external {
+        vm.prank(custodio);
+        try token.setAttestedShares(n % 3001) {} catch {}
     }
 
     function mint(uint256 i, uint256 n) external {

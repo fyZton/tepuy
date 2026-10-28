@@ -27,6 +27,8 @@ for (const [signer, nombre] of Object.values(roles)) {
 }
 const verificados = [cuentaPrueba.address, inversionistaB.address];
 for (const v of verificados) await (await tepuy.connect(agenteKyc).setVerified(v, true)).wait();
+// El custodio atestigua antes de que el emisor pueda acuñar.
+await (await tepuy.connect(custodio).setAttestedShares(10000)).wait();
 await (await tepuy.connect(emisor).mint(cuentaPrueba.address, 1000)).wait();
 
 await (await tepuy.beginDefaultAdminTransfer(admin.address)).wait();
@@ -57,6 +59,7 @@ const abi = [
   "function balanceOf(address) view returns (uint256)",
   "function isVerified(address) view returns (bool)",
   "function isFrozen(address) view returns (bool)",
+  "function accionesAtestiguadas() view returns (uint256)",
 ];
 writeFileSync(fileURLToPath(new URL("../web/deployment.json", import.meta.url)), JSON.stringify({
   chainId: Number(chainId),
