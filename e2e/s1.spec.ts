@@ -11,7 +11,7 @@ test("la página muestra Tepuy Demo y suministro 1100", async ({ page }) => {
   await expect(page.locator("#attested")).toHaveText("10000");
   await expect(page.locator("#usoPct")).toHaveText("11%");
   await expect(page.locator("#mercado")).toHaveText("Abierto");
-  await expect(page.getByRole("note")).toContainText("No es un producto oficial");
+  await expect(page.getByRole("note")).toContainText("No es una oferta de valores ni un producto de la BVC, CVV ni SUNAVAL");
 });
 
 test("la tabla de roles tiene 7 filas", async ({ page }) => {
@@ -30,8 +30,9 @@ test("muestra 2 inversionistas verificados con saldo 1100 y 0", async ({ page })
   await expect(filas.nth(1).locator("td").nth(1)).toHaveText("0");
   await expect(filas.nth(0).locator("td").nth(2)).toHaveText("Activo");
   await expect(filas.nth(1).locator("td").nth(2)).toHaveText("Activo");
+  // Con etiqueta: nombre ficticio y dirección abreviada.
   const dirs = await page.locator("#verificados tbody td:first-child").allTextContents();
-  expect(dirs.every((d) => /^0x[0-9a-fA-F]{40}$/.test(d))).toBe(true);
+  expect(dirs.every((d) => /^\S.* \(demo\)\s*0x[0-9a-fA-F]{4}…[0-9a-fA-F]{4}$/.test(d))).toBe(true);
   expect(new Set(dirs).size).toBe(2);
 });
 

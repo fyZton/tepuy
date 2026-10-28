@@ -96,11 +96,19 @@ const abi = [
   "event PrecioPublicado(uint32 indexed fecha, uint256 centimos, bytes32 sha256Archivo, address indexed oraculo)",
   "event TransferenciaForzada(address indexed from, address indexed to, uint256 amount, string motivo, address indexed recuperador)",
   "event CuentaRecuperada(address indexed perdida, address indexed nueva, uint256 saldo, string motivo, address indexed recuperador)",
+  "event Transfer(address indexed from, address indexed to, uint256 value)",
+  "event VerificacionCambiada(address indexed cuenta, bool verificado, address indexed agente)",
+  "event CongelamientoCambiado(address indexed cuenta, bool congelada, address indexed supervisor)",
+  "event AtestiguacionCambiada(uint256 anterior, uint256 nueva, address indexed custodio)",
+  "event Paused(address account)",
+  "event Unpaused(address account)",
 ];
 writeFileSync(fileURLToPath(new URL("../web/deployment.json", import.meta.url)), JSON.stringify({
   chainId: Number(chainId),
   address,
   verificados,
+  // Nombres ficticios para la web (siempre "(demo)").
+  etiquetas: { [cuentaPrueba.address]: "Ana (demo)", [inversionistaB.address]: "Bruno (demo)" },
   roles: { admin: admin.address, ...Object.fromEntries(Object.entries(roles).map(([k, [v]]) => [k, v.address])) },
   abi,
 }, null, 2));

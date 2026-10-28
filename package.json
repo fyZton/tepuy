@@ -22,6 +22,8 @@
     "node": "hardhat node",
     "deploy:local": "hardhat run scripts/deploy.ts --network localhost",
     "web": "npm run prepare:web && node scripts/serve.mjs",
+    "simular": "hardhat run scripts/simular.ts --network localhost",
+    "demo": "node scripts/demo.mjs",
     "e2e": "playwright test",
     "lint:sol": "solhint \"contracts/**/*.sol\"",
     "prepare:web": "node -e \"const f=require('node:fs');f.mkdirSync('web/vendor',{recursive:true});f.copyFileSync('node_modules/ethers/dist/ethers.min.js','web/vendor/ethers.min.js')\"",

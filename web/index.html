@@ -7,64 +7,132 @@
   <link rel="stylesheet" href="styles.css">
 </head>
 <body>
-  <div class="banner" role="note">Demo de portafolio. No es un producto oficial de la Bolsa de Valores de Caracas.</div>
+  <div class="banner" role="note">Demo con datos de prueba en una red local. No es una oferta de valores ni un producto de la BVC, CVV ni SUNAVAL.</div>
   <main>
-    <h1>Tepuy</h1>
+    <header>
+      <h1>Tepuy</h1>
+      <p class="lead">Cada token TPUY representa 1 acción de MVZ.A guardada en la Caja Venezolana de Valores.</p>
+      <p class="lead">Solo inversionistas verificados pueden tenerlo.</p>
+      <p class="lead">Todo queda registrado y cualquiera puede comprobarlo.</p>
+    </header>
     <p id="error" role="alert" hidden></p>
-    <p>Mercado: <strong id="mercado">Cargando…</strong></p>
-    <dl aria-label="Datos del token" aria-live="polite">
-      <dt>Nombre</dt><dd id="name">Cargando…</dd>
-      <dt>Símbolo</dt><dd id="symbol">Cargando…</dd>
-      <dt>Decimales</dt><dd id="decimals">Cargando…</dd>
-      <dt>Tokens emitidos</dt><dd id="supply">Cargando…</dd>
-      <dt>Acciones en custodia (atestiguadas)</dt><dd id="attested">Cargando…</dd>
-      <dt>Uso del tope</dt><dd><progress id="uso" max="100" value="0" aria-label="Uso del tope de emisión"></progress> <span id="usoPct">—</span></dd>
-    </dl>
-    <h2>Precio de referencia (BVC)</h2>
-    <p id="precio-vacio">Cargando…</p>
-    <dl id="precio" aria-label="Precio de referencia" hidden>
-      <dt>Precio de cierre</dt><dd id="precio-bs">—</dd>
-      <dt>Fecha</dt><dd id="precio-fecha">—</dd>
-      <dt>Publicado</dt><dd id="precio-edad">—</dd>
-      <dt>SHA-256 del archivo</dt><dd><code id="precio-hash">—</code> <button type="button" id="copiar-hash">Copiar</button></dd>
-    </dl>
-    <p id="precio-aviso" role="status" hidden>Precio desactualizado: el cierre tiene más de 3 días o se publicó hace más de 24 horas.</p>
-    <p>Precio declarado por el oráculo (una sola cuenta). El hash permite auditar contra el archivo oficial, no prueba que el precio sea correcto. La BVC no publica este hash.</p>
-    <p>Para verificarlo, calcula el SHA-256 del archivo oficial de la BVC de esa fecha y compáralo con este hash.</p>
-    <h2>Roles</h2>
-    <table id="roles" aria-label="Roles">
-      <thead><tr><th>Rol</th><th>Dirección</th></tr></thead>
-      <tbody></tbody>
-    </table>
-    <h2>Inversionistas</h2>
-    <table id="verificados" aria-label="Inversionistas">
-      <thead><tr><th>Dirección</th><th>Saldo</th><th>Estado</th></tr></thead>
-      <tbody></tbody>
-    </table>
-    <h2>Fecha de registro</h2>
-    <p id="snap-vacio">Cargando…</p>
-    <div id="snap" hidden>
-      <p id="snap-titulo"></p>
-      <table id="snap-saldos" aria-label="Saldos en la fecha de registro">
-        <thead><tr><th>Dirección</th><th>En el corte</th><th>Actual</th></tr></thead>
+    <p class="estado">Mercado: <strong id="mercado">Cargando…</strong></p>
+
+    <section class="tarjetas" aria-label="Resumen">
+      <article class="tarjeta">
+        <h2>Acciones en circulación</h2>
+        <p class="cifra" id="supply">Cargando…</p>
+        <p class="nota">Tokens que existen hoy. Cada uno es una acción.</p>
+      </article>
+      <article class="tarjeta">
+        <h2>Acciones en custodia</h2>
+        <p class="cifra" id="attested">Cargando…</p>
+        <p class="nota">Las que la Caja Venezolana certifica que guarda.</p>
+        <progress id="uso" max="100" value="0" aria-label="Porcentaje de acciones guardadas que ya son tokens"></progress>
+        <p class="nota"><span id="usoPct">—</span> de lo guardado ya es token. <span id="respaldo"></span></p>
+      </article>
+      <article class="tarjeta">
+        <h2>Precio de cierre BVC</h2>
+        <p class="cifra" id="card-precio">—</p>
+        <p class="nota" id="card-fecha">Aún no hay precio publicado.</p>
+      </article>
+      <article class="tarjeta">
+        <h2>Inversionistas verificados</h2>
+        <p class="cifra" id="verif-n">—</p>
+        <p class="nota">Personas cuya identidad ya fue comprobada.</p>
+      </article>
+      <article class="tarjeta">
+        <h2>Operaciones de hoy</h2>
+        <p class="cifra" id="op-hoy">—</p>
+        <p class="nota">Movimientos registrados hoy en el token.</p>
+      </article>
+    </section>
+
+    <section aria-labelledby="t-feed">
+      <h2 id="t-feed">Operaciones en vivo</h2>
+      <p class="ayuda"><strong>¿Qué es esto?</strong> Cada vez que alguien opera, aparece aquí al instante. Nada se puede borrar ni cambiar después.</p>
+      <p id="feed-vacio">Esperando operaciones… (corre <code>npm run simular</code>)</p>
+      <ol id="feed" aria-live="polite" aria-label="Operaciones en vivo"></ol>
+    </section>
+
+    <section aria-labelledby="t-precio">
+      <h2 id="t-precio">Precio de referencia (BVC)</h2>
+      <p class="ayuda"><strong>¿Qué es esto?</strong> El precio oficial de cierre de la acción en la Bolsa de Caracas, publicado por una cuenta llamada oráculo. La huella digital (hash) sirve para comprobar el archivo oficial.</p>
+      <p id="precio-vacio">Cargando…</p>
+      <dl id="precio" aria-label="Precio de referencia" hidden>
+        <dt>Precio de cierre</dt><dd id="precio-bs">—</dd>
+        <dt>Fecha</dt><dd id="precio-fecha">—</dd>
+        <dt>Publicado</dt><dd id="precio-edad">—</dd>
+        <dt>SHA-256 del archivo</dt><dd><code id="precio-hash">—</code> <button type="button" id="copiar-hash">Copiar</button></dd>
+      </dl>
+      <p id="precio-aviso" role="status" hidden>Precio desactualizado: el cierre tiene más de 3 días o se publicó hace más de 24 horas.</p>
+      <p class="nota">Precio declarado por el oráculo (una sola cuenta). El hash permite auditar contra el archivo oficial, no prueba que el precio sea correcto. La BVC no publica este hash.</p>
+      <p class="nota">Para verificarlo, calcula el SHA-256 del archivo oficial de la BVC de esa fecha y compáralo con este hash.</p>
+    </section>
+
+    <section aria-labelledby="t-token">
+      <h2 id="t-token">Datos del token</h2>
+      <p class="ayuda"><strong>¿Qué es esto?</strong> La ficha técnica del token: cómo se llama y que no se puede dividir (no existen medias acciones).</p>
+      <dl aria-label="Datos del token">
+        <dt>Nombre</dt><dd id="name">Cargando…</dd>
+        <dt>Símbolo</dt><dd id="symbol">Cargando…</dd>
+        <dt>Decimales</dt><dd id="decimals">Cargando…</dd>
+      </dl>
+    </section>
+
+    <section aria-labelledby="t-roles">
+      <h2 id="t-roles">Roles</h2>
+      <p class="ayuda"><strong>¿Qué es esto?</strong> Quién puede hacer qué. Cada función importante la tiene una cuenta distinta, para que nadie mande solo.</p>
+      <table id="roles" aria-label="Roles">
+        <thead><tr><th>Rol</th><th>Cuenta</th></tr></thead>
         <tbody></tbody>
       </table>
-    </div>
-    <h2>Dividendos</h2>
-    <p id="div-vacio">Cargando…</p>
-    <div id="div" hidden>
-      <p id="div-titulo"></p>
-      <table id="div-pagos" aria-label="Pagos del dividendo">
-        <thead><tr><th>Tipo</th><th>Tenedor</th><th>Destino</th><th>Acciones</th></tr></thead>
+    </section>
+
+    <section aria-labelledby="t-inv">
+      <h2 id="t-inv">Inversionistas</h2>
+      <p class="ayuda"><strong>¿Qué es esto?</strong> Las personas verificadas y cuántas acciones tiene cada una. &quot;Congelado&quot; significa que el supervisor bloqueó la cuenta.</p>
+      <table id="verificados" aria-label="Inversionistas">
+        <thead><tr><th>Inversionista</th><th>Saldo</th><th>Estado</th></tr></thead>
         <tbody></tbody>
       </table>
-    </div>
-    <h2>Acciones del recuperador</h2>
-    <p id="forzados-vacio">Cargando…</p>
-    <table id="forzados" aria-label="Acciones del recuperador" hidden>
-      <thead><tr><th>Tipo</th><th>Origen</th><th>Destino</th><th>Acciones</th><th>Motivo</th></tr></thead>
-      <tbody></tbody>
-    </table>
+    </section>
+
+    <section aria-labelledby="t-snap">
+      <h2 id="t-snap">Fecha de registro</h2>
+      <p class="ayuda"><strong>¿Qué es esto?</strong> Una foto de quién tenía cuántas acciones en un momento exacto. Se usa para saber quién cobra un dividendo.</p>
+      <p id="snap-vacio">Cargando…</p>
+      <div id="snap" hidden>
+        <p id="snap-titulo"></p>
+        <table id="snap-saldos" aria-label="Saldos en la fecha de registro">
+          <thead><tr><th>Inversionista</th><th>En el corte</th><th>Actual</th></tr></thead>
+          <tbody></tbody>
+        </table>
+      </div>
+    </section>
+
+    <section aria-labelledby="t-div">
+      <h2 id="t-div">Dividendos</h2>
+      <p class="ayuda"><strong>¿Qué es esto?</strong> El pago de utilidades de la empresa, hecho en acciones nuevas. Aquí se ve a quién se le pagó y cuánto.</p>
+      <p id="div-vacio">Cargando…</p>
+      <div id="div" hidden>
+        <p id="div-titulo"></p>
+        <table id="div-pagos" aria-label="Pagos del dividendo">
+          <thead><tr><th>Tipo</th><th>Tenedor</th><th>Destino</th><th>Acciones</th></tr></thead>
+          <tbody></tbody>
+        </table>
+      </div>
+    </section>
+
+    <section aria-labelledby="t-rec">
+      <h2 id="t-rec">Acciones del recuperador</h2>
+      <p class="ayuda"><strong>¿Qué es esto?</strong> Si alguien pierde el acceso a su cuenta, el recuperador (con orden judicial en la vida real) puede mover sus acciones a una cuenta nueva. Siempre queda escrito aquí con su motivo.</p>
+      <p id="forzados-vacio">Cargando…</p>
+      <table id="forzados" aria-label="Acciones del recuperador" hidden>
+        <thead><tr><th>Tipo</th><th>Origen</th><th>Destino</th><th>Acciones</th><th>Motivo</th></tr></thead>
+        <tbody></tbody>
+      </table>
+    </section>
   </main>
   <script type="module" src="app.js"></script>
 </body>
