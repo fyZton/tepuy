@@ -21,6 +21,7 @@ test("Ana a Bruno con 1 muestra Permitida", async ({ page }) => {
   await page.locator("#sim-cant").fill("1");
   await page.getByRole("button", { name: "Simular transferencia" }).click();
   await expect(resultado(page)).toContainText("Permitida: Ana (demo) puede pasarle 1 acción a Bruno (demo).");
+  await expect(resultado(page)).toContainText("no se envió nada, por eso no aparece en el historial");
 });
 
 test("una cantidad mayor que el saldo muestra el motivo de saldo", async ({ page }) => {

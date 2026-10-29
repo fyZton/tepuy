@@ -65,14 +65,15 @@
       <div id="sim-resultado" role="status" hidden>
         <p id="sim-texto"></p>
         <p id="sim-tecnico" class="nota"></p>
+        <p class="nota">Es solo una simulación: no se envió nada, por eso no aparece en el historial.</p>
       </div>
     </section>
 
     <section aria-labelledby="t-feed">
-      <h2 id="t-feed">Operaciones en vivo</h2>
-      <p class="ayuda"><strong>¿Qué es esto?</strong> Cada vez que alguien opera, aparece aquí al instante. Nada se puede borrar ni cambiar después.</p>
-      <p id="feed-vacio">Esperando operaciones…</p>
-      <ol id="feed" aria-live="polite" aria-label="Operaciones en vivo"></ol>
+      <h2 id="t-feed">Operaciones en la cadena</h2>
+      <p class="ayuda"><strong>¿Qué es esto?</strong> Historial público del token, de la más reciente a la más antigua. Si alguien opera ahora, aparece al instante. Nada se puede borrar ni cambiar.</p>
+      <p id="feed-vacio">Aún no hay operaciones</p>
+      <ol id="feed" aria-label="Operaciones en la cadena"></ol>
     </section>
 
     <section aria-labelledby="t-precio">

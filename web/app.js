@@ -68,6 +68,8 @@ let direccion;
 let desde = 0; // bloque del despliegue: en red pública no se leen eventos desde el génesis
 // Testnet pública: RPC oficial de Arbitrum Sepolia. Cualquier otra: nodo local.
 const RPC = { 421614: "https://sepolia-rollup.arbitrum.io/rpc" };
+const EXPLORADOR = { 421614: "https://sepolia.arbiscan.io/tx/" };
+let explorador = null; // prefijo del enlace a cada transacción; null en local
 
 // --- Simulación de transferencias (eth_call; no envía nada) ---
 // El ABI del despliegue no trae errores: se declaran aquí los que puede devolver transfer.
@@ -373,14 +375,32 @@ async function contarHoy() {
   }
   opsHoy = n;
   pintarOps();
+  // Historial al feed (el más reciente queda arriba). Se vacía antes: tras reiniciar el nodo se vuelve a llamar.
+  // Sin aria-live mientras se precarga: el lector no anuncia todo el historial. Un fallo aquí no tumba la página.
+  $("feed").removeAttribute("aria-live");
+  $("feed").replaceChildren();
+  try {
+    const ultimos = logs.slice(-MAX_FEED);
+    const tiempos = await Promise.all(ultimos.map((l) => horaBloque(l.blockNumber)));
+    ultimos.forEach((l, i) => agregarAlFeed(interpretar(l), tiempos[i], l.transactionHash));
+  } catch (e) {
+    console.error(e);
+  }
+  $("feed-vacio").hidden = $("feed").children.length > 0;
+  $("feed").setAttribute("aria-live", "polite");
 }
 
-function agregarAlFeed(texto, segundos) {
+function agregarAlFeed(texto, segundos, hash) {
   const li = document.createElement("li");
   const hora = document.createElement("time");
-  hora.textContent = new Date(segundos * 1000).toLocaleTimeString("es-VE", { hour12: false });
-  const t = document.createElement("span");
+  const fecha = new Date(segundos * 1000);
+  hora.dateTime = fecha.toISOString();
+  hora.textContent = fecha.toDateString() === new Date().toDateString()
+    ? fecha.toLocaleTimeString("es-VE", { hour12: false })
+    : fecha.toLocaleString("es-VE", { hour12: false, dateStyle: "short", timeStyle: "medium" });
+  const t = document.createElement(explorador ? "a" : "span");
   t.textContent = texto;
+  if (explorador) Object.assign(t, { href: explorador + hash, target: "_blank", rel: "noopener", title: "Ver la transacción en Arbiscan" });
   li.append(hora, t);
   $("feed").prepend(li);
   while ($("feed").children.length > MAX_FEED) $("feed").lastElementChild.remove();
@@ -408,7 +428,7 @@ async function sondear() {
         let nuevos = 0;
         for (const { l, p } of eventos) {
           const texto = describir(p);
-          if (texto) { agregarAlFeed(texto, await horaBloque(l.blockNumber)); nuevos++; }
+          if (texto) { agregarAlFeed(texto, await horaBloque(l.blockNumber), l.transactionHash); nuevos++; }
         }
         opsHoy += nuevos;
         pintarOps();
@@ -428,6 +448,7 @@ try {
   token = new Contract(cfg.address, cfg.abi, provider);
   direccion = cfg.address;
   desde = cfg.bloque ?? 0;
+  explorador = EXPLORADOR[cfg.chainId] ?? null;
   ultimoBloque = await provider.getBlockNumber(); // antes de cargar: no se pierde nada entre la carga y el primer sondeo
   await cargar(true);
   await contarHoy();

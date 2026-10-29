@@ -12,7 +12,21 @@ test("se ven los textos explicativos y el aviso de demo", async ({ page }) => {
   await expect(page.getByText("Emisor (crea acciones)")).toBeVisible();
   await expect(page.getByText("Supervisor (puede pausar todo, como SUNAVAL)")).toBeVisible();
   await expect(page.locator("#verif-n")).toHaveText("2");
-  await expect(page.getByRole("heading", { name: "Operaciones en vivo" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Operaciones en la cadena" })).toBeVisible();
+});
+
+test("al cargar, el feed muestra el historial del despliegue (más reciente arriba, sin enlace en local)", async ({ page }) => {
+  await page.goto("/");
+  await expect(page.locator("#feed li").first()).toBeVisible();
+  await expect(page.locator("#feed-vacio")).toBeHidden();
+  await expect(page.locator("#feed li").filter({ hasText: "El agente KYC verificó a Ana (demo)" })).not.toHaveCount(0);
+  await expect(page.locator("#feed")).toHaveAttribute("aria-live", "polite");
+  await expect(page.locator("#feed a")).toHaveCount(0); // red local: sin explorador
+  const textos = await page.locator("#feed li").allTextContents();
+  const kyc = textos.findIndex((t) => t.includes("verificó a Ana (demo)"));
+  const emision = textos.findIndex((t) => /Se crearon 1\.?000 acciones nuevas para Ana \(demo\)/.test(t));
+  expect(emision).toBeGreaterThanOrEqual(0);
+  expect(emision).toBeLessThan(kyc); // en el despliegue se acuña después del KYC: más reciente, más arriba
 });
 
 test("en móvil no hay scroll horizontal", async ({ page }) => {
@@ -28,7 +42,6 @@ test("en móvil no hay scroll horizontal", async ({ page }) => {
 test("el simulador agrega operaciones al feed sin recargar", async ({ page }) => {
   test.setTimeout(120_000);
   await page.goto("/");
-  await expect(page.locator("#feed-vacio")).toBeVisible();
   await expect(page.locator("#verif-n")).toHaveText("2");
   await expect(page.locator("#op-hoy")).toHaveText(/^\d+$/);
   const antes = Number(await page.locator("#op-hoy").textContent());

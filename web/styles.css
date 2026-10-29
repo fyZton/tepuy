@@ -32,6 +32,7 @@ th, td { text-align: left; padding: .5rem; border-bottom: 1px solid var(--linea)
 #feed:empty { display: none; }
 #feed li { display: flex; gap: .75rem; padding: .5rem .75rem; border-bottom: 1px solid var(--linea); animation: entra .4s ease-out; }
 #feed time { color: var(--tenue); font-variant-numeric: tabular-nums; flex: none; }
+#feed a { color: var(--acento); text-underline-offset: 2px; }
 #sim { display: grid; grid-template-columns: repeat(auto-fit, minmax(13rem, 1fr)); gap: 1rem; align-items: end; }
 #sim label { display: flex; flex-direction: column; gap: .25rem; font-weight: 600; min-width: 0; }
 #sim label[hidden] { display: none; }
