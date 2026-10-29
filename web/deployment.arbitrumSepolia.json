@@ -1,0 +1,56 @@
+{
+  "chainId": 421614,
+  "address": "0x656d9D17da6F097a2BCb759B3cCB275bD9015a1A",
+  "bloque": 324053467,
+  "verificados": [
+    "0x487f68c44A7F2d9179c0dCe32556A09922A3c346",
+    "0xF2AEEB1e807F48c9E50a730Ad35eb92AAEcc8bb8"
+  ],
+  "etiquetas": {
+    "0x487f68c44A7F2d9179c0dCe32556A09922A3c346": "Ana (demo)",
+    "0xF2AEEB1e807F48c9E50a730Ad35eb92AAEcc8bb8": "Bruno (demo)"
+  },
+  "traspasoAdminPendiente": true,
+  "roles": {
+    "admin": "0xBF5EE25d12d794fd254477747c7e1210282975DF",
+    "emisor": "0xe2808bfBcF1f0701E60f43058e2c75B481bCb849",
+    "custodio": "0xaf49F6c08aB97528d628b35C050318C39F08aD7A",
+    "agenteKyc": "0x25551f5B4317Aee15d6598FEAB46DF692065F49A",
+    "supervisor": "0x8d3828c68ecE2d0ECDC5a6ea931a63C4a4331b98",
+    "oraculo": "0x892d0a39c2D54D5D0897925695BeEcFc520219F6",
+    "recuperador": "0x50803508CfA83E15d3381D62dFc512bcA24cCd78"
+  },
+  "abi": [
+    "function name() view returns (string)",
+    "function symbol() view returns (string)",
+    "function decimals() view returns (uint8)",
+    "function totalSupply() view returns (uint256)",
+    "function balanceOf(address) view returns (uint256)",
+    "function isVerified(address) view returns (bool)",
+    "function isFrozen(address) view returns (bool)",
+    "function accionesAtestiguadas() view returns (uint256)",
+    "function paused() view returns (bool)",
+    "function snapshot() returns (uint256)",
+    "function snapshotCount() view returns (uint256)",
+    "function snapshotBlock(uint256) view returns (uint48)",
+    "function balanceOfAt(address, uint256) view returns (uint256)",
+    "function totalSupplyAt(uint256) view returns (uint256)",
+    "function dividendo(uint256) view returns (uint256 numerador, uint256 denominador)",
+    "function dividendoPagado(uint256, address) view returns (bool)",
+    "event DividendoDeclarado(uint256 indexed snapId, uint256 numerador, uint256 denominador, address indexed emisor)",
+    "event DividendoPagado(uint256 indexed snapId, address indexed tenedor, address indexed destino, uint256 monto)",
+    "event DividendoOmitido(uint256 indexed snapId, address indexed tenedor, address indexed destino, uint256 monto)",
+    "event FraccionPendiente(uint256 indexed snapId, address indexed tenedor, address indexed destino, uint256 resto)",
+    "event SnapshotCreado(uint256 indexed id, uint48 bloque, address indexed emisor)",
+    "function ultimoPrecio() view returns (uint256 centimos, bytes32 sha256Archivo, uint32 fecha, uint64 publicadoEn)",
+    "event PrecioPublicado(uint32 indexed fecha, uint256 centimos, bytes32 sha256Archivo, address indexed oraculo)",
+    "event TransferenciaForzada(address indexed from, address indexed to, uint256 amount, string motivo, address indexed recuperador)",
+    "event CuentaRecuperada(address indexed perdida, address indexed nueva, uint256 saldo, string motivo, address indexed recuperador)",
+    "event Transfer(address indexed from, address indexed to, uint256 value)",
+    "event VerificacionCambiada(address indexed cuenta, bool verificado, address indexed agente)",
+    "event CongelamientoCambiado(address indexed cuenta, bool congelada, address indexed supervisor)",
+    "event AtestiguacionCambiada(uint256 anterior, uint256 nueva, address indexed custodio)",
+    "event Paused(address account)",
+    "event Unpaused(address account)"
+  ]
+}

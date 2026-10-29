@@ -65,6 +65,9 @@ const dir = (d) => ({ dir: d });
 let token;
 let provider;
 let direccion;
+let desde = 0; // bloque del despliegue: en red pública no se leen eventos desde el génesis
+// Testnet pública: RPC oficial de Arbitrum Sepolia. Cualquier otra: nodo local.
+const RPC = { 421614: "https://sepolia-rollup.arbitrum.io/rpc" };
 
 // --- Simulación de transferencias (eth_call; no envía nada) ---
 // El ABI del despliegue no trae errores: se declaran aquí los que puede devolver transfer.
@@ -278,7 +281,7 @@ async function cargarEventos() {
     while (id > 0n && (await token.dividendo(id))[1] === 0n) id--;
     if (id > 0n) {
       const [num, den] = await token.dividendo(id);
-      const filtro = (f) => token.queryFilter(f, 0);
+      const filtro = (f) => token.queryFilter(f, desde);
       const evs = (await Promise.all([
         filtro(token.filters.DividendoPagado(id)), filtro(token.filters.DividendoOmitido(id)), filtro(token.filters.FraccionPendiente(id)),
       ])).flat().sort((a, b) => a.blockNumber - b.blockNumber || a.index - b.index);
@@ -302,8 +305,8 @@ async function cargarEventos() {
     $("div-vacio").textContent = "No se pudo leer el dividendo.";
   }
   const [forzadas, recuperadas] = await Promise.all([
-    token.queryFilter(token.filters.TransferenciaForzada()),
-    token.queryFilter(token.filters.CuentaRecuperada()),
+    token.queryFilter(token.filters.TransferenciaForzada(), desde),
+    token.queryFilter(token.filters.CuentaRecuperada(), desde),
   ]);
   const eventos = [...forzadas, ...recuperadas].sort((a, b) => a.blockNumber - b.blockNumber || a.index - b.index);
   $("forzados-vacio").textContent = "Sin movimientos forzados";
@@ -356,7 +359,7 @@ const pintarOps = () => { $("op-hoy").textContent = opsHoy.toString(); };
 async function contarHoy() {
   const t = await horaBloque(ultimoBloque);
   const inicio = t - (t % 86400);
-  const logs = (await provider.getLogs({ address: direccion, fromBlock: 0, toBlock: ultimoBloque })).filter((l) => interpretar(l));
+  const logs = (await provider.getLogs({ address: direccion, fromBlock: desde, toBlock: ultimoBloque })).filter((l) => interpretar(l));
   const porBloque = new Map();
   for (const l of logs) porBloque.set(l.blockNumber, (porBloque.get(l.blockNumber) ?? 0) + 1);
   const bloques = [...porBloque.keys()].sort((a, b) => b - a);
@@ -420,13 +423,15 @@ async function sondear() {
 
 try {
   const cfg = await leerConfig();
-  provider = new JsonRpcProvider("http://127.0.0.1:8545", undefined, { staticNetwork: true });
+  const rpc = RPC[cfg.chainId];
+  provider = new JsonRpcProvider(rpc ?? "http://127.0.0.1:8545", undefined, { staticNetwork: true });
   token = new Contract(cfg.address, cfg.abi, provider);
   direccion = cfg.address;
+  desde = cfg.bloque ?? 0;
   ultimoBloque = await provider.getBlockNumber(); // antes de cargar: no se pierde nada entre la carga y el primer sondeo
   await cargar(true);
   await contarHoy();
-  setInterval(sondear, 2000);
+  setInterval(sondear, rpc ? 10000 : 2000); // RPC público: sondeo más espaciado por su límite de peticiones
 } catch (e) {
   console.error(e);
   $("uso").value = 0;

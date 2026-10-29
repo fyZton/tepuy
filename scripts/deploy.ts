@@ -53,6 +53,7 @@ if (!local) {
 }
 const tepuy = await ethers.deployContract("Tepuy", [RETRASO_ADMIN_SEG, desplegador.address]);
 await tepuy.waitForDeployment();
+const bloque = (await tepuy.deploymentTransaction()!.wait())!.blockNumber; // la web lee eventos desde aquí
 
 // clave -> [signer, nombre del rol en el contrato]
 const roles = {
@@ -137,6 +138,7 @@ const sinKyc = (await ethers.getSigners())[14]; // en red pública casi nunca ex
 writeFileSync(fileURLToPath(new URL(`../web/deployment${local ? "" : `.${networkName}`}.json`, import.meta.url)), JSON.stringify({
   chainId: Number(chainId),
   address,
+  bloque,
   verificados,
   // Cuenta 14 de Hardhat: sin roles ni KYC y fuera del simulador (usa 8-13). Demo de transferencia rechazada (S16).
   ...(sinKyc && { sinKyc: sinKyc.address }),
